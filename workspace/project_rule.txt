@@ -1,0 +1,3 @@
+# agentic-paper-reading - Project Rules
+
+> Applies to all interns working under the agentic-paper-reading project.
