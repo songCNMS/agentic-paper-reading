@@ -19,7 +19,7 @@ python3 ~/.codex/skills/hf-weekly-agentic-report/scripts/generate_report.py \
 This creates:
 
 - `<prefix>.md`: selected agentic-LLM papers with titles, arXiv IDs, categories, and inclusion notes.
-- `<prefix>-summaries.md`: per-paper summaries with **Main innovation** highlights.
+- `<prefix>-summaries.md`: per-paper summaries with **Main innovation**, **中文版本**, and **中文锐评** highlights.
 - `<prefix>.pdf`: compiled summary PDF.
 - `<prefix>-assets/`: downloaded PDFs, parsed text, and metadata JSON.
 
@@ -33,7 +33,7 @@ This creates:
 python3 -m pip install --user pypdf reportlab
 ```
 
-4. Inspect the generated markdown and PDF. If the user asks for higher-quality summaries, refine `<prefix>-summaries.md` using the parsed paper texts under `<prefix>-assets/texts/`, then rerender the PDF:
+4. Inspect the generated markdown and PDF. If the user asks for higher-quality summaries or sharper Chinese commentary, refine `<prefix>-summaries.md` using the parsed paper texts under `<prefix>-assets/texts/`, then rerender the PDF:
 
 ```bash
 python3 ~/.codex/skills/hf-weekly-agentic-report/scripts/generate_report.py \
@@ -62,5 +62,5 @@ Use `--all` only when the user wants every paper on the weekly page included.
 ## Notes
 
 - The script uses Hugging Face only for the weekly paper list and arXiv for metadata/PDFs.
-- Summaries are generated from arXiv abstracts plus extracted paper text. They are concise first-pass summaries; for publication-quality commentary, manually refine the summary markdown before final rendering.
+- Summaries are generated from arXiv abstracts plus extracted paper text. They are concise first-pass summaries with bilingual Chinese sections; for publication-quality commentary, manually refine the summary markdown before final rendering.
 - Do not commit generated assets unless the user explicitly asks. Downloaded PDFs can be large.

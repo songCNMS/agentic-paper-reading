@@ -25,6 +25,8 @@ try:
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import inch
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 except Exception as exc:  # pragma: no cover - environment guard
     raise SystemExit("Missing dependency reportlab. Install with: python3 -m pip install --user reportlab") from exc
@@ -209,6 +211,49 @@ def concise_summary(paper: Paper) -> str:
     return " ".join(sentences[:3])[:850]
 
 
+def chinese_version(paper: Paper) -> str:
+    category = paper.category
+    title = paper.title
+    if "Benchmark" in category or "evaluation" in category.lower():
+        return f"这篇论文提出或扩展了一个面向智能体能力的评测框架：{title}。它的重点不是单轮问答，而是更接近真实部署中的多步任务、环境交互、工具使用或失败发现，用来暴露现有模型在长期规划、状态跟踪和可靠执行上的短板。"
+    if "Multi-agent" in category:
+        return f"这篇论文围绕多智能体协作展开：{title}。它关注多个智能体如何组织、通信、递归协作或分工执行任务，核心价值在于把能力提升从单个模型扩展到系统级协同。"
+    if "Memory" in category:
+        return f"这篇论文关注长期智能体的记忆问题：{title}。它强调智能体不能只依赖上下文窗口，而需要结构化、可检索、可维护的外部记忆来支撑跨会话和长时程任务。"
+    if "GUI" in category:
+        return f"这篇论文面向 GUI、浏览器或终端智能体：{title}。它关注智能体如何理解界面元素、页面状态、命令行技能或用户意图，是数字环境自动化的重要基础组件。"
+    if "Embodied" in category:
+        return f"这篇论文面向具身或 VLA 智能体：{title}。它把视觉、语言和动作连接起来，强调从感知理解走向真实动作执行时所需的训练、评测或安全机制。"
+    if "reward" in category.lower() or "training" in category.lower():
+        return f"这篇论文关注智能体训练和奖励建模：{title}。它试图把监督信号从最终结果推进到过程、步骤或轨迹层面，从而提升多步推理和交互任务中的信用分配质量。"
+    if "safety" in category.lower() or "alignment" in category.lower():
+        return f"这篇论文关注智能体安全与对齐：{title}。它讨论目标导向模型在执行、规划、评测或自我优化过程中可能出现的风险，并尝试给出评测或缓解机制。"
+    if "Retrieval" in category:
+        return f"这篇论文关注检索、RAG 或研究型智能体：{title}。它强调智能体需要在大规模知识源中规划查询、组织证据、综合结果，并保持可追溯性。"
+    return f"这篇论文与 agentic LLM 工作流相关：{title}。它提供了一个方法、系统、数据集或评测视角，帮助智能体在更复杂的任务环境中完成规划、执行或自我改进。"
+
+
+def chinese_critique(paper: Paper) -> str:
+    category = paper.category
+    if "Benchmark" in category or "evaluation" in category.lower():
+        return "锐评：评测价值很高，但 benchmark 的生命力取决于任务是否持续贴近真实失败模式；如果样本过于固定，很快会变成刷榜目标。"
+    if "Multi-agent" in category:
+        return "锐评：多智能体方案很容易把复杂度包装成能力提升；关键要看它是否比简单的 planner-router-worker 架构更稳、更可调试。"
+    if "Memory" in category:
+        return "锐评：记忆系统的难点不只是存和取，更是何时信任旧信息、何时遗忘、以及如何避免错误记忆污染后续决策。"
+    if "GUI" in category:
+        return "锐评：界面定位只是数字自治的第一步；真正困难的是理解操作后果、恢复错误状态，并适应真实软件的复杂变化。"
+    if "Embodied" in category:
+        return "锐评：具身方向最怕仿真或代理指标看起来很好，但真实环境一落地就失真；校准和安全边界比单纯性能数字更重要。"
+    if "reward" in category.lower() or "training" in category.lower():
+        return "锐评：过程奖励能改善信用分配，但也可能诱导模型学会迎合奖励模板；必须监控奖励黑客和探索能力退化。"
+    if "safety" in category.lower() or "alignment" in category.lower():
+        return "锐评：安全评测很必要，但不能过度依赖模型自述的推理轨迹；真实风险往往出现在评测分布之外。"
+    if "Retrieval" in category:
+        return "锐评：检索型智能体的关键不是多搜，而是知道何时停止、如何证明覆盖充分，以及如何处理互相冲突的证据。"
+    return "锐评：方向有参考价值，但需要看它是否能在开放任务、噪声环境和真实用户反馈中保持稳定，而不只是论文设置下有效。"
+
+
 def write_list_markdown(papers: list[Paper], out: Path, source_url: str) -> None:
     lines = [
         f"# Agentic LLM Papers from Hugging Face Weekly Papers",
@@ -242,6 +287,8 @@ def write_summary_markdown(papers: list[Paper], out: Path, list_name: str, asset
             f"- **Summary:** {concise_summary(p)}",
             f"- **Agentic relevance:** {p.why_included}",
             f"- **Takeaway:** Review this paper when working on {p.category.lower()} for agentic LLM systems.",
+            f"- **中文版本：** {chinese_version(p)}",
+            f"- **中文锐评：** {chinese_critique(p)}",
             "",
         ])
     out.write_text("\n".join(lines), encoding="utf-8")
@@ -250,11 +297,13 @@ def write_summary_markdown(papers: list[Paper], out: Path, list_name: str, asset
 def render_pdf(markdown_path: Path, pdf_path: Path) -> None:
     from xml.sax.saxutils import escape
 
+    cjk_font = "STSong-Light"
+    pdfmetrics.registerFont(UnicodeCIDFont(cjk_font))
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="Body2", parent=styles["BodyText"], fontSize=9.2, leading=12.2, spaceAfter=4))
-    styles.add(ParagraphStyle(name="Bullet2", parent=styles["BodyText"], fontSize=8.9, leading=11.6, leftIndent=16, firstLineIndent=-10, spaceAfter=2.6))
-    styles.add(ParagraphStyle(name="H1x", parent=styles["Title"], fontSize=18, leading=22, spaceAfter=12))
-    styles.add(ParagraphStyle(name="H2x", parent=styles["Heading2"], fontSize=12.2, leading=14.5, spaceBefore=8, spaceAfter=4, keepWithNext=True))
+    styles.add(ParagraphStyle(name="Body2", parent=styles["BodyText"], fontName=cjk_font, fontSize=9.2, leading=12.2, spaceAfter=4))
+    styles.add(ParagraphStyle(name="Bullet2", parent=styles["BodyText"], fontName=cjk_font, fontSize=8.9, leading=11.6, leftIndent=16, firstLineIndent=-10, spaceAfter=2.6))
+    styles.add(ParagraphStyle(name="H1x", parent=styles["Title"], fontName=cjk_font, fontSize=18, leading=22, spaceAfter=12))
+    styles.add(ParagraphStyle(name="H2x", parent=styles["Heading2"], fontName=cjk_font, fontSize=12.2, leading=14.5, spaceBefore=8, spaceAfter=4, keepWithNext=True))
 
     def inline(s: str) -> str:
         s = escape(s)
@@ -277,7 +326,7 @@ def render_pdf(markdown_path: Path, pdf_path: Path) -> None:
 
     def footer(canvas, doc):
         canvas.saveState()
-        canvas.setFont("Helvetica", 8)
+        canvas.setFont(cjk_font, 8)
         canvas.setFillColor(colors.HexColor("#666666"))
         canvas.drawString(0.7 * inch, 0.45 * inch, markdown_path.stem)
         canvas.drawRightString(letter[0] - 0.7 * inch, 0.45 * inch, f"Page {doc.page}")
