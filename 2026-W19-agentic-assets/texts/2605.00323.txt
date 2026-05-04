@@ -1,0 +1,979 @@
+
+
+===== PAGE 1 =====
+Online Self-Calibration Against Hallucination in Vision-Language Models
+Minghui Chen1,2∗ ,Chenxu Yang 1,2∗ ,Hengjie Zhu 1,2 ,Dayan Wu 1,2† ,Zheng Lin 1,2 ,Qingyi Si 3
+1Institute of Information Engineering, Chinese Academy of Sciences, Beijing, China
+2School of Cyber Security, University of Chinese Academy of Sciences, Beijing, China
+3JD.COM
+Abstract
+Large Vision-Language Models (LVLMs) often
+suffer from hallucinations, generating descriptions
+that include visual details absent from the in-
+put image. Recent preference alignment meth-
+ods typically rely on supervision distilled from
+stronger models such as GPT. However, this of-
+fline paradigm introduces a Supervision-Perception
+Mismatch: the student model is forced to align
+with fine-grained details beyond its perceptual ca-
+pacity, learning to guess rather than to see. To
+obtain reliable self-supervision for online learn-
+ing, we identify a Generative-Discriminative Gap
+within LVLMs, where models exhibit higher accu-
+racy on discriminative verification than open-ended
+generation. Leveraging this capability, we propose
+OnlineSelf-CAlibRation (OSCAR), a framework
+that integrates Monte Carlo Tree Search with a
+Dual-Granularity Reward Mechanism to construct
+preference data and iteratively refines the model via
+Direct Preference Optimization. Extensive experi-
+ments demonstrate that OSCAR achieves state-of-
+the-art performance on hallucination benchmarks
+while improving general multimodal capabilities.
+1 Introduction
+Large Vision-Language Models (LVLMs) [Liuet al., 2023c;
+Zhuet al., 2023; Baiet al., 2023; Daiet al., 2023; Luet al.,
+2024] integrate visual encoders with pre-trained Large Lan-
+guage Models (LLMs), achieving strong performance across
+a wide range of multimodal tasks, from image captioning
+to visual reasoning. However, these models frequently suf-
+fer from hallucinations [Rawteet al., 2023; Baiet al., 2024;
+Liuet al., 2024 ], generating content that is inconsistent with
+or absent from the visual input, such as fabricating non-
+existent objects, misinterpreting spatial relationships, or in-
+correctly describing object attributes. This limitation poses
+a significant barrier to deploying LVLMs in safety-critical
+domains like autonomous driving, medical imaging, and
+robotics, where factual grounding is essential.
+∗ Equal Contribution
+† Dayan Wu is the corresponding author.
+This is a warm, lived-in, and eclectic living…Main Area:-The focal point is…amouse…-Behind…a small green glass object…Background and Details:-A small, silver floor lamp…
+This is a warm, inviting, and slightly cluttered…Key Features:* Fireplace:… and a mirrorabove it…* Decor: … a large, framed poster…* Architecture:…a blue wall…
+SFThallucinations!
+Figure 1: Supervision-Perception Mismatch. Offline supervision
+from a stronger teacher model forces the student to describe visual
+details it cannot reliably perceive, resulting in hallucinations.
+Recent efforts to mitigate hallucinations have largely re-
+lied on preference alignment techniques, including Rein-
+forcement Learning from Human Feedback (RLHF) [Sunet
+al., 2024 ] and DPO [Rafailovet al., 2023 ]. These meth-
+ods typically construct preference datasets using human an-
+notations [Sunet al., 2024; Gunjalet al., 2024 ] or re-
+sponses distilled from stronger, proprietary models such as
+GPT [Achiamet al., 2023; Liuet al., 2023a; Liet al., 2023a;
+Zhouet al., 2024 ]. While effective to some extent, we argue
+that this reliance on offline supervision introduces a funda-
+mental Supervision-Perception Mismatch. As illustrated in
+Fig. 1, teacher models with superior visual capabilities tend to
+produce highly detailed descriptions that capture subtle visual
+elements, such as small objects or fine-grained attributes that
+are difficult to discern. When a weaker student model is su-
+pervised by such data, it is compelled to reproduce these fine-
+grained details that lie beyond its perceptual capacity. Unable
+arXiv:2605.00323v1  [cs.CV]  1 May 2026
+
+===== PAGE 2 =====
+to ground these descriptions in actual visual features, the stu-
+dent instead resorts to exploiting language priors and statis-
+tical shortcuts, generating different but equally ungrounded
+content. In essence, the model learns to guess rather than to
+see. This observation is further validated by our pilot experi-
+ments in Section 3.1. We find that fine-tuning LLaV A-1.5-7B
+on teacher-distilled data paradoxically increases hallucination
+rates, with performance degrading further as more training
+data is added. These findings motivate a shift toward online
+learning, where training data respects the model’s intrinsic
+perceptual boundaries.
+A natural question arises: can we obtain high-quality,
+truthful supervision from a model that is itself prone to hallu-
+cination? To address this, we identify a notable Generative-
+Discriminative Gap within LVLMs. Our analysis shows that
+while models often yield to language inertia during autore-
+gressive generation, they exhibit considerably higher accu-
+racy on discriminative tasks, such as verifying whether a
+specific object exists in an image. This gap arises because
+discriminative verification, by explicitly conditioning on a
+specific query, reduces the influence of unconstrained lan-
+guage priors that dominate open-ended generation. This find-
+ing suggests that LVLMs possess a latent capacity for self-
+verification that remains underutilized during generation.
+While the Generative-Discriminative Gap addresses the
+question of where to obtain reliable supervision, another key
+challenge lies in how to construct high-quality training data.
+Standard decoding strategies like greedy or beam search op-
+timize locally, presenting two limitations. First, some to-
+kens that appear safe at the current step may carry high risk
+of inducing hallucinations in subsequent generation, a cas-
+cading effect that local optimization cannot foresee. Sec-
+ond, greedily selecting branches with the lowest immedi-
+ate hallucination rate at each step may compromise over-
+all response quality in terms of logical consistency and flu-
+ency. To overcome these limitations, we integrate Monte
+Carlo Tree Search (MCTS) to explore the generation space
+more strategically [Xieet al., 2024a; Tianet al., 2024;
+Zhanget al., 2024 ]. We design a Dual-Granularity Reward
+Mechanism to guide the search. At the node level, we lever-
+age the model’s discriminative capability by prompting it to
+verify whether each generated sentence mentions objects ab-
+sent from the image, using the probability of a negative re-
+sponse as the process reward. At the trajectory level, we em-
+ploy a Gated Outcome Reward that evaluates response quality
+only if the complete response passes a faithfulness check, and
+returns zero otherwise.
+Through MCTS backpropagation, terminal rewards propa-
+gate from leaf nodes to the root, enabling the model to iden-
+tify generation trajectories that balance visual faithfulness
+with descriptive richness. Building on these insights, we pro-
+poseOnlineSelf-CAlibRation (OSCAR), a unified frame-
+work for online preference learning. Specifically, OSCAR
+extracts preference pairs from the MCTS tree at two gran-
+ularities: global path comparison selects complete trajecto-
+ries with the highest and lowest cumulative values, while sib-
+ling comparison pairs nodes along the optimal path with their
+worst-performing siblings. These preference pairs are then
+used to update the model via DPO [Rafailovet al., 2023 ].
+At each iteration, the updated model generates new prefer-
+ence data through MCTS, ensuring the training distribution
+evolves alongside the model’s capabilities and enabling con-
+tinuous self-improvement. Our contributions are as follows:
+• We empirically demonstrate the necessity of online pref-
+erence learning that respects the model’s intrinsic per-
+ceptual boundaries, showing that offline distillation from
+stronger teachers can unexpectedly exacerbate halluci-
+nations.
+• We propose OSCAR, a novel training paradigm that ex-
+ploits the Generative-Discriminative Gap. By integrat-
+ing MCTS with a Dual-Granularity Reward Mechanism,
+OSCAR enables lookahead to suppress early tokens that
+risk inducing downstream hallucinations.
+• Extensive experiments show that OSCAR achieves
+state-of-the-art performance on hallucination bench-
+marks while simultaneously improving general multi-
+modal capabilities.
+2 Related Work
+2.1 Hallucination in LVLMs
+Large Vision-Language Models (LVLMs) frequently suffer
+from hallucinations, generating content that is inconsistent
+with the visual input [Rawteet al., 2023; Baiet al., 2024 ].
+Various approaches have been proposed to mitigate this issue,
+including enhancing dataset quality [Liuet al., 2023b; Gun-
+jalet al., 2024; Siet al., 2023; Liet al., 2023a ], manipulating
+the decoding process [Lenget al., 2024; Huanget al., 2024;
+Yanget al., 2025e; Suoet al., 2025; Siet al., 2021 ], leverag-
+ing external models for post-hoc correction [Yinet al., 2024;
+Zhouet al., 2024; Siet al., 2022b ], and preference optimiza-
+tion [Xieet al., 2024b; Wanget al., 2025; Yanget al., 2025b;
+Siet al., 2022a]. Though effective to some extent, these meth-
+ods predominantly rely on offline supervision, which may in-
+troduce a Supervision-Perception Mismatch when the target
+model lacks the perceptual capabilities to ground such fine-
+grained details.
+2.2 Self-Improvement for LLMs
+Self-improvement methods enable models to enhance their
+capabilities using self-generated feedback, reducing reliance
+on external annotations[Huanget al., 2023; Yuanet al., 2024;
+Huet al., 2024; Yanget al., 2026a; Sunet al., 2025;
+Daiet al., 2025 ]. In the vision-language domain, recent
+works such as STIC [Denget al., 2024 ] and SIMA [Wang
+et al., 2025 ] have explored self-improvement for hallucina-
+tion mitigation. However, these methods typically construct
+preference data via simple sampling or beam search, which
+fails to account for the cascading nature of hallucinations.
+We instead integrate MCTS with a Dual-Granularity Reward
+Mechanism, enabling lookahead to suppress tokens that risk
+inducing downstream hallucinations.
+2.3 Monte Carlo Tree Search
+Monte Carlo Tree Search (MCTS) has emerged as a pow-
+erful technique for enhancing reasoning in LLMs, inspired
+by its success in game-playing agents [Silveret al., 2016 ].
+
+===== PAGE 3 =====
+PerformanceDegradation
+(a)
+(b) (c)
+Figure 2: Performance comparison before and after supervised fine-
+tuning with stronger teacher-distilled data.
+Recent works have adapted MCTS to guide text genera-
+tion by simulating future trajectories and backpropagating
+rewards, achieving improvements in mathematical reason-
+ing [Xieet al., 2024a; Tianet al., 2024; Zhanget al., 2024;
+Yanget al., 2025c; Yanget al., 2025d ] and task plan-
+ning [Haoet al., 2023; Li and Ng, 2025; Yanget al., 2026b;
+Liet al., 2025 ]. In the context of hallucination mitigation, we
+are the first to leverage MCTS for preference data construc-
+tion, enabling lookahead to suppress locally plausible tokens
+that risk inducing downstream hallucinations.
+3 Observations and Motivations
+3.1 Supervision-Perception Mismatch
+Recent preference alignment methods predominantly rely on
+supervision signals distilled from stronger, proprietary mod-
+els such as GPT [Achiamet al., 2023 ]. We hypothesize that
+this reliance on offline supervision introduces a fundamental
+Supervision-Perception Mismatch: when a target model with
+limited visual perception capacity is trained on data generated
+by a teacher model with superior perceptual abilities, the stu-
+dent is compelled to align with fine-grained visual details that
+exceed its intrinsic perceptual capabilities. Consequently, the
+model may learn to minimize training loss by exploiting lan-
+guage priors and statistical shortcuts rather than grounding
+its outputs in visual features. As illustrated in Fig. 1, teacher
+models with superior visual capabilities tend to capture sub-
+tle visual elements that weaker models cannot reliably per-
+ceive. For instance, the teacher model identifies a ”mouse”
+near the laptop, a ”green glass object” in the corner, and a
+”floor lamp” in the background. When supervised by such
+data, the student model fails to ground these details in actual
+visual features, instead generating different but equally un-
+grounded content, such as hallucinating a ”mirror” above the
+Generative  paradigmPrompt: Please describe this image in detail.LLaV A-1.5: The image features a giraffe standing in a pen…In the background, there is a clock mounted on the wall, possibly indicating the time for visitors…Discriminative  paradigmPrompt: Is there a clock in the image?LLaV A-1.5: No, there is no clock in the image…
+Figure 3: Illustration of the Generative-Discriminative Gap.
+fireplace, a ”poster”, and a ”blue wall” that does not exist.
+To empirically validate this hypothesis, we employ
+Qwen3-VL-8B-Instruct [Yanget al., 2025a ] to generate de-
+tailed image descriptions on randomly sampled images from
+the LLaV A-150k dataset, and use these teacher-generated
+descriptions to fine-tune LLaV A-1.5-7B with varying data
+scales (2.5k, 5k, 7.5k, and 10k samples). As shown in
+Fig. 2 (a), despite Qwen3-VL achieving 88.91% on POPE
+F1, the fine-tuned LLaV A models consistently underperform
+the original baseline (85.87%), with performance degrading
+further as more training data is added. Similar trends are
+observed on the AMBER benchmark, where both CHAIR
+and Cog scores deteriorate after fine-tuning (Fig. 2b-c). This
+counterintuitive finding confirms thatofflinesupervision can
+paradoxically exacerbate hallucinations, motivating our shift
+towardonlinelearning.
+3.2 Generative-Discriminative Gap
+To explore whether a hallucination-prone model can still
+provide useful self-supervision, we investigate its behavior
+across different inference paradigms. Our analysis reveals a
+notableGenerative-Discriminative Gap: while models fre-
+quently yield to language inertia during autoregressive gener-
+ation, where plausible linguistic patterns overshadow visual
+grounding, they exhibit improved accuracy when tasked with
+discriminative verification against visual evidence. Fig. 3 il-
+lustrates this gap with a concrete example. When prompted to
+describe an image in detail, LLaV A-1.5 hallucinates a ”clock
+mounted on the wall” that does not exist. However, when the
+same model is explicitly asked ”Is there a clock in the im-
+age?”, it correctly answers “No”. This discrepancy suggests
+that discriminative verification, by conditioning on a specific
+query, reduces the influence of unconstrained language priors
+that dominate open-ended generation.
+To quantify this gap, we conduct the following analysis.
+We first generate image captions using LLaV A-1.5-7B on 500
+randomly sampled images from the COCO dataset and com-
+pute the CHAIR metrics. For each hallucinated objectxde-
+tected in the generated captions, we construct a discrimina-
+tive query: “Is there a/anxin the image?” and prompt the
+same model to respond with “Yes” or “No”. If the model
+correctly answers “No”, we remove this hallucinated object
+from the caption and recompute the CHAIR metrics. As
+shown in Fig. 3, this simple self-verification procedure re-
+duces CHAIR S from 49.0% to 36.0% and CHAIR I from
+14.3% to 9.3%, confirming that LVLMs possess a latent ca-
+pacity for self-verification that remains underutilized during
+
+===== PAGE 4 =====
+standard generation. This finding motivates our approach: by
+leveraging the model’s discriminative ability to curate train-
+ing data, we can align the granularity of generated descrip-
+tions with the model’s intrinsic perceptual capabilities while
+improving factual accuracy.
+4 Methodology
+Building upon the insights from Section 3, we presentOnline
+Self-CAlibRation (OSCAR) , a framework that leverages the
+model’s capability to construct high-quality online preference
+data and iteratively refines the model through DPO. In this
+section, we first detail our MCTS-guided generation with a
+dual-granularity reward mechanism (§4.2), and then describe
+the preference learning procedure (§4.3).
+4.1 LVLM Inference
+A Large Vision-Language Model (LVLM)M θ with param-
+etersθtakes as input a visual imagevand a textual instruc-
+tionq, and generates a textual responsey= (y 1, y2, . . . , yT )
+in an autoregressive manner. Specifically, at each generation
+stept, the model computes the probability distribution over
+the vocabulary conditioned on the visual input, the textual in-
+struction, and the previously generated tokens:
+p(yt|v,q, y <t;θ) =Softmax(ℓ t),(1)
+whereℓ t denotes the logit vector for the next tokeny t, and
+y<t = (y 1, . . . , yt−1)represents the sequence of tokens gen-
+erated before stept. The complete response is generated by
+sequentially sampling tokens from this distribution until the
+end-of-sequence token is produced.
+4.2 MCTS-Guided Generation
+A key challenge in constructing faithful training data is that
+standard decoding strategies such as greedy or beam search
+optimize locally, which suffers from two limitations. First,
+tokens that seem acceptable at the current step may induce
+hallucinations in later generation, a long-term risk that local
+optimization cannot anticipate. Second, prioritizing branches
+with minimal immediate hallucination at each step may de-
+grade overall response quality, sacrificing logical consistency
+and fluency. To overcome these limitations, we integrate
+Monte Carlo Tree Search (MCTS) into the generation pro-
+cess. By simulating future trajectories and backpropagating
+terminal rewards, MCTS enables the model to evaluate the
+long-term value of each token, identifying generation paths
+that balance visual faithfulness with descriptive richness.
+MCTS Procedure.We decompose the generation process
+into sentence-level steps, where each node in the search
+tree represents a partial response. Formally, lets t =
+(v,q, a 1, a2, . . . , at−1)denote the state at stept, wherea i
+represents thei-th generated sentence. An actiona t corre-
+sponds to generating a complete sentence, delimited by ter-
+minal punctuation marks. Each MCTS iteration consists of
+four phases:
+•Selection.Starting from the root node, we traverse the
+tree by selecting child nodes according to the PUCT
+(Predictor + Upper Confidence bounds applied to Trees)
+criterion [Rosin, 2011]:
+a∗ = arg max
+a
+"
+Q(s, a) +c puct ·p(a|s)·
+p
+N(s)
+1 +N(s, a)
+#
+,
+(2)
+whereQ(s, a)denotes the action value,p(a|s) =
+πθ(a|s)/|a|λ is the length-normalized policy probabil-
+ity with penaltyλ,N(s)andN(s, a)are visit counts,
+andc puct controls the exploration-exploitation trade-off.
+•Expansion.At a leaf node, we sampleKcandidate sen-
+tences from the policyπ θ using temperature sampling.
+To ensure diversity, we filter candidates with embedding
+similarity exceeding a thresholdτ sim.
+•Evaluation.Each expanded node receives a value score
+through ourDual-Granularity Reward Mechanism, de-
+tailed below.
+•Backpropagation.After evaluation, statistics are prop-
+agated from the leaf node back to the root. The Q-value
+and state value are updated as:
+Q(st, a) =r(s t, a) +γ·V(s t+1),(3)
+V(s t) =
+P
+a N(s t+1)·Q(s t, a)P
+a N(s t+1) ,(4)
+wherer(s t, a) =value(s t+1)−value(s t)represents the
+immediate reward andγis the discount factor.
+Dual-Granularity Reward Mechanism.Central to our
+approach is a reward mechanism that combines node-level
+process supervision with trajectory-level outcome evaluation.
+This design enables the search to identify early tokens that,
+while locally plausible, carry high risk of inducing down-
+stream hallucinations.
+Process Reward (Node-Level).For each generated sen-
+tencea t, we employ the model’s discriminative capability to
+assess whether the sentence mentions objects absent from the
+image. Specifically, we construct a verification prompt:
+<image>Please determine if the following sentence
+mentions objects that are not present in the image:
+{sentence}
+Answer Choices: (A) Yes (B) No
+The process rewardr proc is computed as the probability that
+the model judges the sentence as hallucination-free:
+rproc(at) =p θ
+ 
+“No”|v,P proc(at)
+
+,(5)
+whereP proc(at)denotes the verification prompt instantiated
+with the candidate sentencea t.
+Gated Outcome Reward (Trajectory-Level).To evaluate
+the quality of a complete trajectory, we perform a greedy
+rollout from the current state to a terminal state, yielding a
+complete responsey rollout. The outcome reward incorporates
+agating mechanismthat enforces strict faithfulness require-
+ments. First, we assess whether the complete response con-
+tains any hallucinated content through a faithfulness check.
+Specifically, we extract all objects mentioned in the gener-
+ated description and compare them against the ground-truth
+
+===== PAGE 5 =====
+GeneratorJudgerInstruction
+Visual input
+Can you describe the main features of this image?
+MLLM
+preference pairsRejectRejectRejectChosenChosenChosen
+R
+MINQMAX Q
+0.80.90.7
+RolloutScore
+Iterative Evolution
+👑R①Selection②Expansion
+𝑆!𝑆"
+R𝑆!𝑆"𝑆!_!𝑆!_#
+③Evaluation
+Higher PUCT
+R𝑆!𝑆"𝑆!_!𝑆!_#
+𝑆!_$
+④BackpropagationR𝑆!𝑆"𝑆!_!𝑺𝟐_𝟏
+𝑆!_$𝑺𝟐_𝒙 𝑆"_$
+Monte Carlo Tree SearchOnline Self-CalibrationDual-Granularity Reward Mechanism<image> Please determine if the following sentencementions objects that are not present in the image: {𝑺𝟐_𝟏}Answer Choices: (A) Yes (B) NoProcess Reward
+𝑷“𝑩”+𝑷(“𝑵𝒐”)
+0.9
+Gated Outcome Reward
+Direct Preference Optimization
+<image> Please evaluate the caption on threedimensions: logical consistency, linguistic fluency, and redundancy.Description: {R,𝑺𝟐,𝑺𝟐𝟏,𝑺𝟐𝒙}Please provide a single overall score from 0 to 10, where 0is extremely poor and 10 is excellent.
+response:“8”8/10 = 0.8
+Dual-Granularity Reward
+ “No”
+“Yes”1* 0.8=0.80* 0.8=0{R,𝑺𝟐,𝑺𝟐𝟏,𝑺𝟐𝒙}
+{ground-truth}Hallucinated?
+R𝑆!𝑆"𝑆!_!𝑺𝟐_𝟏
+𝑆!_$𝑺𝟐_𝒙
+PropagatedNew nodes
+Figure 4: Overview of Online Self-CAlibRation (OSCAR). Left: Monte Carlo Tree Search explores the generation space through selection,
+expansion, evaluation, and backpropagation. Middle: Preference pairs are extracted from the MCTS tree to refine the model via Direct
+Preference Optimization. Right: The Dual-Granularity Reward Mechanism combines a process reward that verifies each sentence, and a
+gated outcome reward that evaluates response quality only when the trajectory is hallucination-free.
+objects provided by the dataset. Specifically, we extract all
+object nouns from the generated description and map them
+to canonical COCO category names using a predefined syn-
+onym dictionary. If any mapped object does not appear in the
+ground-truth object set, the response is considered to contain
+hallucinations. The gating function is defined as:
+g(yrollout) =1[O(y rollout)⊆ O gt],(6)
+whereO(y rollout)denotes the set of canonical object names
+extracted from the generated response, andO gt denotes the
+ground-truth object set. Second, for trajectories that pass the
+gate, we assess the response quality along dimensions of log-
+ical consistency, linguistic fluency, and redundancy:
+<image>Please evaluate the following caption on three
+dimensions: logical consistency, linguistic fluency, and re-
+dundancy.
+Caption:{y rollout}
+Please provide a single overall score from 0 to 10, where 0
+is extremely poor and 10 is excellent.
+Let score quality ∈[0,10]denote the extracted quality score.
+The gated outcome reward is defined as:
+rout(yrollout) =
+scorequality/10ifg(y rollout) = 1,
+0otherwise. (7)
+The final value assigned combines both granularities:
+value(st, at) =r proc(st, at) +r out(yrollout).(8)
+Through MCTS backpropagation, this trajectory-level reward
+signal propagates from leaf nodes to the root, elevating the
+estimated value of early tokens that lead to faithful and high-
+quality completions.
+4.3 Iterative Preference Learning
+Preference Pair Extraction.We extract preference pairs
+from the MCTS tree at two levels of granularity. Forglobal
+path comparison, we identify the complete path with the
+highest cumulative Q-value as the chosen responsey + and
+the one with the lowest Q-value as the rejected responsey −:
+y+ = arg max
+y∈T
+Q(y),y − = arg min
+y∈T
+Q(y),(9)
+whereTdenotes the set of all complete trajectories in the
+tree. Forsibling comparison, we traverse each depth along
+the optimal path and pair the selected node with its worst-
+performing sibling, if their Q-value difference exceeds a
+thresholdδ Q:
+(y+
+d ,y−
+d ) = (s<d⊕a∗d, s<d⊕aworstd ),ifQ(a∗d)−Q(aworstd )≥δ Q,
+(10)
+wheres <d denotes the partial response up to depthd, and
+⊕denotes concatenation. This step-wise comparison en-
+ables the extraction of multiple preference pairs from a single
+MCTS tree, maximizing the utilization of information accu-
+mulated during the search process.
+DPO Training.Given the preference datasetD=
+{(vi,q i,y +
+i ,y −
+i )}N
+i=1 constructed via MCTS, we update the
+model using Direct Preference Optimization (DPO)[Rafailov
+et al., 2023]. The DPO objective directly optimizes the policy
+to prefer chosen responses over rejected ones:
+LDPO(θ) =−E (v,q,y+,y−)∼D
+
+logσ
+ 
+β·h θ(y+,y −)
+
+,
+(11)
+whereσ(·)is the sigmoid function,βis a temperature param-
+eter, and:
+hθ(y+,y −) = log πθ(y+|v,q)
+πref(y+|v,q) −log πθ(y−|v,q)
+πref(y−|v,q) .(12)
+
+===== PAGE 6 =====
+Method
+Generative Task Discriminative Task
+Object HalBench AMBER-Gen. MM-VET AMBER-Dis. POPE
+CHAIRs ↓CHAIR i ↓CHAIR↓Cover↑Hal↓Cog↓Overall↑Acc↑F1↑F1↑
+InstructBLIP[Daiet al., 2023] 42.37.99.4 51.8 40.5 4.8 25.7 74.3 79.9 78.56
+MiniGPT-4[Zhuet al., 2023] 31.4 11.1 13.663.065.3 11.3 22.1 63.6 64.7 61.50
+mPLUG-Owl2[Yeet al., 2024] 54.4 12.0 10.6 52.2 39.9 4.537.675.6 78.5 86.20
+LLaV A-1.5-7B[Liuet al., 2023c] 49.0 14.3 7.6 49.6 31.2 3.6 32.5 72.2 75.5 85.87
++STIC[Denget al., 2024] - - 7.6 52.1 35.8 4.4 31.8 71.6 74.2 -
++POVID[Zhouet al., 2024] 33.6 9.0 5.0 50.1 28.6 3.0 31.7 71.9 74.786.90
++SIMA[Wanget al., 2025] 40.9 10.4 6.4 47.4 26.1 3.2 31.6 73.4 76.4 -
++Self-Rewarding 38.4 11.2 6.8 48.2 27.5 3.0 32.8 73.1 76.8 85.93
++OSCAR (Iter1)32.0 9.7 5.6 46.0 22.1 2.1 32.9 74.4 78.3 86.04
++OSCAR (Iter2)28.6 9.0 5.1 45.4 19.4 1.9 33.8 75.3 79.4 86.07
++OSCAR (Iter3) 27.6 8.2 4.5 45.7 17.2 1.6 34.6 75.8 80.2 86.22
+LLaV A-1.5-13B[Liuet al., 2023c] 44.8 11.8 6.450.930.3 3.137.667.9 69.1 86.67
++Self-Rewarding 35.2 9.6 5.4 48.3 24.6 2.4 36.8 69.5 71.2 86.78
++OSCAR (Iter1)16.4 5.8 3.3 45.8 13.3 0.9 37.4 71.9 74.1 86.89
++OSCAR (Iter2)7.8 2.8 2.8 48.7 9.9 0.6 35.6 70.3 71.9 87.20
++OSCAR (Iter3) 5.4 2.6 2.6 47.6 8.0 0.5 36.5 72.4 74.6 87.26
+Table 1: Comparison with state-of-the-art methods on hallucination benchmarks. We evaluate on both generative tasks and discriminative
+tasks. The best results are shown inboldand the second best results are underlined .↓indicates lower is better,↑indicates higher is better.
+Here,π ref denotes the reference policy, initialized as the
+model checkpoint before the current iteration. The training
+proceeds iteratively: at each iterationm, we use the current
+policyπ (m)
+θ to construct new preference data via MCTS, then
+update the model to obtainπ (m+1)
+θ . This online paradigm
+ensures that the training distribution evolves alongside the
+model’s improving capabilities, progressively tightening the
+alignment between generated content and the model’s percep-
+tual boundaries.
+5 Experiments
+5.1 Experimental Setup
+Evaluation Benchmarks.We conduct evaluations on both
+generative and discriminative hallucination tasks. For the
+generative task, we evaluate on Object-HalBench [Rohrbach
+et al., 2018], AMBER [Wanget al., 2023], and MM-VET[Yu
+et al., 2023]. For the discriminative task, we report results on
+AMBER [Wanget al., 2023 ] and POPE [Liet al., 2023b ].
+Detailed descriptions of evaluation metrics and benchmark
+designs are provided in the Appendix.
+Baselines.We compare OSCAR with three categories of
+methods: (1) other open-source LVLMs, including Instruct-
+BLIP [Daiet al., 2023 ], MiniGPT-4 [Zhuet al., 2023 ], and
+mPLUG-Owl2 [Yeet al., 2024 ]; (2) SoTA data-driven pref-
+erence learning methods for hallucination mitigation, includ-
+ing STIC [Denget al., 2024 ], POVID [Zhouet al., 2024 ],
+and SIMA [Wanget al., 2025 ]; (3) a Self-Rewarding base-
+line that employs the same hallucination detection reward but
+constructs preference data via beam search instead of MCTS.
+Implementation Details.We adopt LLaV A-1.5-7B and
+LLaV A-1.5-13B as base models. For preference data con-
+struction, we sample images and prompts from LLaV A-
+150k [Liuet al., 2023c ], yielding 120k preference pairs per
+iteration. The MCTS search is configured withc puct = 1.0,
+length penaltyλ= 1.25, andQ-value difference threshold
+δQ = 0.05. For DPO training, we employ LoRA [Huet al.,
+2022] with rank 128 andα= 256, using the Adam optimizer
+with a learning rate of1×10 −5 and temperatureβ= 0.1.
+The model is iteratively trained for 3 iterations.
+5.2 Main Results
+Overall Performance.Tab. 1 presents comprehensive com-
+parisons between OSCAR and existing methods on hallu-
+cination benchmarks. Our method achieves state-of-the-art
+performance on both generative and discriminative tasks,
+demonstrating its effectiveness in mitigating hallucinations
+while preserving general multimodal capabilities.
+Generative Task.On Object-HalBench, OSCAR substan-
+tially reduces hallucination metrics for LLaV A-1.5-7B, de-
+creasing CHAIRS from 49.0 to 27.6 and CHAIR I from 14.3
+to 8.2. These improvements significantly surpass prior meth-
+ods such as POVID (33.6/9.0) and SIMA (40.9/10.4). On
+AMBER generative metrics, OSCAR achieves the lowest Hal
+score (17.2) and Cog score (1.6), indicating fewer halluci-
+nated responses and reduced reliance on human-like cogni-
+tive shortcuts. Notably, on MM-VET, which evaluates gen-
+eral multimodal understanding, OSCAR improves the overall
+score from 32.5 to 34.6, demonstrating that our hallucination
+mitigation does not compromise response quality or descrip-
+tive richness. For the larger LLaV A-1.5-13B model, OSCAR
+yields even more substantial gains, achieving CHAIRS of 5.4
+and CHAIRI of 2.6, which represent reductions of 87.9% and
+78.0% respectively compared to the baseline.
+Discriminative Task.On discriminative benchmarks, OS-
+CAR also demonstrates consistent improvements. For AM-
+BER discrimination, OSCAR improves accuracy from 72.2%
+to 75.8% and F1 score from 75.5% to 80.2% on LLaV A-1.5-
+7B. On POPE, OSCAR achieves an F1 score of 86.22%, com-
+parable to POVID (86.90%), while significantly outperform-
+ing it on generative tasks. These results confirm that OSCAR
+
+===== PAGE 7 =====
+Index PR GOR MCTS CHAIRs CHAIRi POPE
+1 - - - 49.0 14.3 85.87
+2 ✓- - 46.7 13.8 86.01
+3 ✓-✓ 45.6 13.5 86.00
+4 -✓ ✓ 44.0 12.6 86.03
+5 ✓ ✓ ✓ 32.0 9.7 86.04
+Table 2: Ablation study on key components of OSCAR. PR: Process
+Reward; GOR: Gated Outcome Reward.
+Method CHAIR↓Hal↓Cog↓
+LLaV A-1.5-7B 7.6 31.2 3.6
++SFT (Qwen3-VL) 9.2 62.7 6.1
++SFT (LLaV A) 7.5 30.6 3.4
++SFT (OSCAR)4.5 15.4 1.4
+Table 3: Comparison of different training data sources on AMBER
+benchmark. All methods use 10k training samples.
+enhances the model’s visual grounding capability across both
+generative and discriminative paradigms.
+Iterative Improvement.A key advantage of our approach
+is its ability to enable continuous self-improvement through
+iterative training. As shown in Tab. 1, performance im-
+proves progressively from Iter1 to Iter3 across all metrics.
+For LLaV A-1.5-7B, CHAIRS decreases from 32.0 (Iter1) to
+28.6 (Iter2) and further to 27.6 (Iter3), while the AMBER
+Hal score drops from 22.1 to 19.4 to 17.2 over the same itera-
+tions. Similar trends are observed for LLaV A-1.5-13B, where
+CHAIRS decreases from 16.4 (Iter1) to 7.8 (Iter2) and finally
+to 5.4 (Iter3). This progressive enhancement validates our
+online learning paradigm: as the model improves, the quality
+of MCTS-generated preference data also increases, creating a
+virtuous cycle that enables sustained capability growth.
+5.3 Analysis
+Ablation StudiesTo analyze the contribution of each com-
+ponent in OSCAR, we conduct ablation studies on LLaV A-
+1.5-7B using a single iteration. Results are shown in Tab. 2.
+Effect of Process Reward.Comparing Index 4 and 5, adding
+the process reward substantially reduces CHAIR S from 44.0
+to 32.0, demonstrating that node-level hallucination feedback
+is essential for fine-grained guidance during tree search.Ef-
+fect of Gated Outcome Reward.Comparing Index 3 and
+5, incorporating the gated outcome reward reduces CHAIR S
+from 45.6 to 32.0, ensuring trajectory-level faithfulness that
+complements the local process reward.Effect of MCTS.
+Comparing Index 2 and 5, integrating MCTS dramatically
+reduces CHAIR S from 46.7 to 32.0, confirming that looka-
+head search is crucial for identifying tokens that may induce
+downstream hallucinations. The full model significantly out-
+performs all partial configurations, indicating that the three
+components work synergistically.
+Analysis of online LearningTo validate the effectiveness
+of on-policy learning, we compare three training strategies
+Please describe this picture.
+The image features a man sitting at a dining table, holding a cell phone to his ear. He is surrounded by various items, including a bowl of food, a spoon, a fork, and a book. There are also two couches in the room, one on the left side and another on the right side.\n\nAdditionally, there are two chairs in the scene, one near the man and another further away. A bottle can be seen on the table, and a cup is placed nearby. A backpack is also present in the room, located on the right side of the scene.OSCAR (Ours)
+LLaVA-1.5
+The image depicts a man sitting at a dining table,surrounded by various items. He is holding a cell phone to his ear while eating from a bowl containing food. The table is cluttered with a bowl of popcorn and another bowl with food.\n\nThere are several chairs around the table, with one near the man and others placed at different angles. Some CDs can be seen on the table, and a remote control is placed nearby. The scene includes everyday objects and personal items.
+Figure 5: Qualitative comparison between LLaV A-1.5 and OSCAR.
+Hallucinated content is highlighted in red, while correct descriptions
+are shown in green. OSCAR generates fewer hallucinations.
+using 10k samples: (1) SFT with Qwen3-VL-8B-Instruct dis-
+tilled data, (2) SFT with LLaV A’s own generated data, and (3)
+SFT with chosen samples from our OSCAR-constructed pref-
+erence data. Results are shown in Tab. 3. SFT with Qwen3-
+VL distilled data increases CHAIR from 7.6 to 9.2 and Hal
+from 31.2 to 62.7, confirming the Supervision-Perception
+Mismatch discussed in Section 3.1. SFT with LLaV A’s own
+generated data maintains similar performance but yields no
+improvement. In contrast, SFT with our OSCAR-constructed
+data substantially reduces CHAIR to 4.5, Hal to 15.4, and
+Cog to 1.4, demonstrating that our MCTS-guided data con-
+struction effectively leverages the model’s discriminative ca-
+pability to generate high-quality online training data.
+Case StudyFig. 5 presents a qualitative comparison be-
+tween LLaV A-1.5 and our OSCAR method. LLaV A-1.5 gen-
+erates numerous hallucinated objects (highlighted in red) that
+are entirely absent from the image, while in contrast, our
+OSCAR method produces significantly fewer hallucinations.
+Moreover, the response generated by OSCAR exhibits bet-
+ter fluency and reduced redundancy, resulting in a more con-
+cise and coherent description. This demonstrates that our
+dual-granularity reward mechanism effectively balances vi-
+sual faithfulness with overall response quality.
+6 Conclusion
+In this paper, we identified two key observations: a
+Supervision-Perception Mismatch in offline preference
+learning that unexpectedly worsen hallucinations, and a
+Generative-Discriminative Gap that provides reliable self-
+supervision signals. Building on these insights, we proposed
+Iterative Self-Calibration (OSCAR), which integrates MCTS
+with a Dual-Granularity Reward Mechanism for online pref-
+erence learning. Experiments demonstrated that OSCAR
+achieves state-of-the-art performance on hallucination bench-
+marks while improving general multimodal capabilities. Our
+work highlights the importance of respecting the model’s in-
+trinsic perceptual boundaries , offering a new perspective for
+building more reliable vision-language systems.
+
+===== PAGE 8 =====
+References
+[Achiamet al., 2023 ] Josh Achiam, Steven Adler, Sandhini
+Agarwal, Lama Ahmad, Ilge Akkaya, Florencia Leoni
+Aleman, Diogo Almeida, Janko Altenschmidt, Sam Alt-
+man, Shyamal Anadkat, et al. Gpt-4 technical report.
+arXiv preprint arXiv:2303.08774, 2023.
+[Baiet al., 2023 ] Jinze Bai, Shuai Bai, Yunfei Chu, Zeyu
+Cui, Kai Dang, Xiaodong Deng, Yang Fan, Wenbin Ge,
+Yu Han, Fei Huang, et al. Qwen technical report.arXiv
+preprint arXiv:2309.16609, 2023.
+[Baiet al., 2024 ] Zechen Bai, Pichao Wang, Tianjun Xiao,
+Tong He, Zongbo Han, Zheng Zhang, and Mike Zheng
+Shou. Hallucination of multimodal large language models:
+A survey.arXiv preprint arXiv:2404.18930, 2024.
+[Daiet al., 2023 ] Wenliang Dai, Junnan Li, Dongxu Li, An-
+thony Tiong, Junqi Zhao, Weisheng Wang, Boyang Li,
+Pascale N Fung, and Steven Hoi. Instructblip: Towards
+general-purpose vision-language models with instruction
+tuning.Advances in neural information processing sys-
+tems, 36:49250–49267, 2023.
+[Daiet al., 2025 ] Muzhi Dai, Chenxu Yang, and Qingyi Si.
+S-grpo: Early exit via reinforcement learning in reasoning
+models, 2025.
+[Denget al., 2024 ] Yihe Deng, Pan Lu, Fan Yin, Ziniu Hu,
+Sheng Shen, Quanquan Gu, James Y Zou, Kai-Wei Chang,
+and Wei Wang. Enhancing large vision language mod-
+els with self-training on image comprehension.Advances
+in Neural Information Processing Systems, 37:131369–
+131397, 2024.
+[Gunjalet al., 2024 ] Anisha Gunjal, Jihan Yin, and Erhan
+Bas. Detecting and preventing hallucinations in large vi-
+sion language models. InProceedings of the AAAI Confer-
+ence on Artificial Intelligence, volume 38, pages 18135–
+18143, 2024.
+[Haoet al., 2023 ] Shibo Hao, Yi Gu, Haodi Ma, Joshua
+Hong, Zhen Wang, Daisy Wang, and Zhiting Hu. Reason-
+ing with language model is planning with world model. In
+Proceedings of the 2023 Conference on Empirical Meth-
+ods in Natural Language Processing, pages 8154–8173,
+2023.
+[Huet al., 2022 ] Edward J Hu, Yelong Shen, Phillip Wallis,
+Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang,
+Weizhu Chen, et al. Lora: Low-rank adaptation of large
+language models.ICLR, 1(2):3, 2022.
+[Huet al., 2024 ] Chi Hu, Yimin Hu, Hang Cao, Tong Xiao,
+and Jingbo Zhu. Teaching language models to self-
+improve by learning from language feedback.arXiv
+preprint arXiv:2406.07168, 2024.
+[Huanget al., 2023 ] Jiaxin Huang, Shixiang Gu, Le Hou,
+Yuexin Wu, Xuezhi Wang, Hongkun Yu, and Jiawei Han.
+Large language models can self-improve. InProceedings
+of the 2023 conference on empirical methods in natural
+language processing, pages 1051–1068, 2023.
+[Huanget al., 2024 ] Qidong Huang, Xiaoyi Dong, Pan
+Zhang, Bin Wang, Conghui He, Jiaqi Wang, Dahua Lin,
+Weiming Zhang, and Nenghai Yu. Opera: Alleviating hal-
+lucination in multi-modal large language models via over-
+trust penalty and retrospection-allocation. InProceedings
+of the IEEE/CVF Conference on Computer Vision and Pat-
+tern Recognition, pages 13418–13427, 2024.
+[Lenget al., 2024 ] Sicong Leng, Hang Zhang, Guanzheng
+Chen, Xin Li, Shijian Lu, Chunyan Miao, and Lidong
+Bing. Mitigating object hallucinations in large vision-
+language models through visual contrastive decoding. In
+Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, pages 13872–13882,
+2024.
+[Li and Ng, 2025] Junyi Li and Hwee Tou Ng. Think&cite:
+Improving attributed text generation with self-guided tree
+search and progress reward modeling. InProceedings of
+the 63rd Annual Meeting of the Association for Computa-
+tional Linguistics (Volume 1: Long Papers), pages 9928–
+9942, 2025.
+[Liet al., 2023a ] Lei Li, Zhihui Xie, Mukai Li, Shunian
+Chen, Peiyi Wang, Liang Chen, Yazheng Yang, Benyou
+Wang, and Lingpeng Kong. Silkie: Preference distil-
+lation for large visual language models.arXiv preprint
+arXiv:2312.10665, 2023.
+[Liet al., 2023b ] Yifan Li, Yifan Du, Kun Zhou, Jinpeng
+Wang, Wayne Xin Zhao, and Ji-Rong Wen. Evaluating ob-
+ject hallucination in large vision-language models.arXiv
+preprint arXiv:2305.10355, 2023.
+[Liet al., 2025 ] Zhigen Li, Jianxiang Peng, Yanmeng Wang,
+Yong Cao, Tianhao Shen, Minghui Zhang, Linxi Su,
+Shang Wu, Yihang Wu, Yuqian Wang, et al. Chatsop: An
+sop-guided mcts planning framework for controllable llm
+dialogue agents. InProceedings of the 63rd Annual Meet-
+ing of the Association for Computational Linguistics (Vol-
+ume 1: Long Papers), pages 17637–17659, 2025.
+[Liuet al., 2023a ] Fuxiao Liu, Kevin Lin, Linjie Li, Jianfeng
+Wang, Yaser Yacoob, and Lijuan Wang. Aligning large
+multi-modal model with robust instruction tuning.CoRR,
+2023.
+[Liuet al., 2023b ] Fuxiao Liu, Kevin Lin, Linjie Li, Jianfeng
+Wang, Yaser Yacoob, and Lijuan Wang. Mitigating hallu-
+cination in large multi-modal models via robust instruction
+tuning.arXiv preprint arXiv:2306.14565, 2023.
+[Liuet al., 2023c ] Haotian Liu, Chunyuan Li, Qingyang Wu,
+and Yong Jae Lee. Visual instruction tuning.Advances in
+neural information processing systems, 36:34892–34916,
+2023.
+[Liuet al., 2024 ] Hanchao Liu, Wenyuan Xue, Yifei Chen,
+Dapeng Chen, Xiutian Zhao, Ke Wang, Liping Hou,
+Rongjun Li, and Wei Peng. A survey on hallucina-
+tion in large vision-language models.arXiv preprint
+arXiv:2402.00253, 2024.
+[Luet al., 2024 ] Haoyu Lu, Wen Liu, Bo Zhang, Bingxuan
+Wang, Kai Dong, Bo Liu, Jingxiang Sun, Tongzheng Ren,
+Zhuoshu Li, Hao Yang, et al. Deepseek-vl: towards
+real-world vision-language understanding.arXiv preprint
+arXiv:2403.05525, 2024.
+
+===== PAGE 9 =====
+[Rafailovet al., 2023 ] Rafael Rafailov, Archit Sharma, Eric
+Mitchell, Christopher D Manning, Stefano Ermon, and
+Chelsea Finn. Direct preference optimization: Your lan-
+guage model is secretly a reward model.Advances in
+neural information processing systems, 36:53728–53741,
+2023.
+[Rawteet al., 2023 ] Vipula Rawte, Amit Sheth, and Amitava
+Das. A survey of hallucination in large foundation models.
+arXiv preprint arXiv:2309.05922, 2023.
+[Rohrbachet al., 2018 ] Anna Rohrbach, Lisa Anne Hen-
+dricks, Kaylee Burns, Trevor Darrell, and Kate Saenko.
+Object hallucination in image captioning.arXiv preprint
+arXiv:1809.02156, 2018.
+[Rosin, 2011] Christopher D Rosin. Multi-armed bandits
+with episode context.Annals of Mathematics and Artifi-
+cial Intelligence, 61(3):203–230, 2011.
+[Siet al., 2021 ] Qingyi Si, Zheng Lin, Ming yu Zheng, Peng
+Fu, and Weiping Wang. Check it again:progressive visual
+question answering via visual entailment. In Chengqing
+Zong, Fei Xia, Wenjie Li, and Roberto Navigli, editors,
+Proceedings of the 59th Annual Meeting of the Association
+for Computational Linguistics and the 11th International
+Joint Conference on Natural Language Processing (Vol-
+ume 1: Long Papers), pages 4101–4110, Online, August
+2021. Association for Computational Linguistics.
+[Siet al., 2022a ] Qingyi Si, Yuanxin Liu, Fandong Meng,
+Zheng Lin, Peng Fu, Yanan Cao, Weiping Wang, and Jie
+Zhou. Towards robust visual question answering: Mak-
+ing the most of biased samples via contrastive learning. In
+Yoav Goldberg, Zornitsa Kozareva, and Yue Zhang, edi-
+tors,Findings of the Association for Computational Lin-
+guistics: EMNLP 2022, pages 6650–6662, Abu Dhabi,
+United Arab Emirates, December 2022. Association for
+Computational Linguistics.
+[Siet al., 2022b ] Qingyi Si, Fandong Meng, Mingyu Zheng,
+Zheng Lin, Yuanxin Liu, Peng Fu, Yanan Cao, Weip-
+ing Wang, and Jie Zhou. Language prior is not the only
+shortcut: A benchmark for shortcut learning in VQA. In
+Yoav Goldberg, Zornitsa Kozareva, and Yue Zhang, edi-
+tors,Findings of the Association for Computational Lin-
+guistics: EMNLP 2022, pages 3698–3712, Abu Dhabi,
+United Arab Emirates, December 2022. Association for
+Computational Linguistics.
+[Siet al., 2023 ] Qingyi Si, Yuchen Mo, Zheng Lin, Huishan
+Ji, and Weiping Wang. Combo of thinking and observ-
+ing for outside-knowledge VQA. In Anna Rogers, Jordan
+Boyd-Graber, and Naoaki Okazaki, editors,Proceedings
+of the 61st Annual Meeting of the Association for Com-
+putational Linguistics (Volume 1: Long Papers), pages
+10959–10975, Toronto, Canada, July 2023. Association
+for Computational Linguistics.
+[Silveret al., 2016 ] David Silver, Aja Huang, Chris J Maddi-
+son, Arthur Guez, Laurent Sifre, George Van Den Driess-
+che, Julian Schrittwieser, Ioannis Antonoglou, Veda Pan-
+neershelvam, Marc Lanctot, et al. Mastering the game
+of go with deep neural networks and tree search.nature,
+529(7587):484–489, 2016.
+[Sunet al., 2024 ] Zhiqing Sun, Sheng Shen, Shengcao Cao,
+Haotian Liu, Chunyuan Li, Yikang Shen, Chuang Gan,
+Liangyan Gui, Yu-Xiong Wang, Yiming Yang, et al.
+Aligning large multimodal models with factually aug-
+mented rlhf. InFindings of the Association for Computa-
+tional Linguistics: ACL 2024, pages 13088–13110, 2024.
+[Sunet al., 2025 ] Yutao Sun, Mingshuai Chen, Tiancheng
+Zhao, Ruochen Xu, Zilun Zhang, and Jianwei Yin. The
+self-improvement paradox: Can language models boot-
+strap reasoning capabilities without external scaffolding?
+arXiv preprint arXiv:2502.13441, 2025.
+[Suoet al., 2025 ] Wei Suo, Lijun Zhang, Mengyang Sun,
+Lin Yuanbo Wu, Peng Wang, and Yanning Zhang. Oc-
+topus: Alleviating hallucination via dynamic contrastive
+decoding. InProceedings of the Computer Vision and Pat-
+tern Recognition Conference, pages 29904–29914, 2025.
+[Tianet al., 2024 ] Ye Tian, Baolin Peng, Linfeng Song,
+Lifeng Jin, Dian Yu, Lei Han, Haitao Mi, and Dong Yu.
+Toward self-improvement of llms via imagination, search-
+ing, and criticizing.Advances in Neural Information Pro-
+cessing Systems, 37:52723–52748, 2024.
+[Wanget al., 2023 ] Junyang Wang, Yuhang Wang, Guohai
+Xu, Jing Zhang, Yukai Gu, Haitao Jia, Ming Yan, Ji Zhang,
+and Jitao Sang. An llm-free multi-dimensional benchmark
+for mllms hallucination evaluation.CoRR, 2023.
+[Wanget al., 2025 ] Xiyao Wang, Jiuhai Chen, Zhaoyang
+Wang, Yuhang Zhou, Yiyang Zhou, Huaxiu Yao, Tianyi
+Zhou, Tom Goldstein, Parminder Bhatia, Taha Kass-Hout,
+et al. Enhancing visual-language modality alignment in
+large vision language models via self-improvement. In
+Findings of the Association for Computational Linguistics:
+NAACL 2025, pages 268–282, 2025.
+[Xieet al., 2024a ] Yuxi Xie, Anirudh Goyal, Wenyue
+Zheng, Min-Yen Kan, Timothy P Lillicrap, Kenji
+Kawaguchi, and Michael Shieh. Monte carlo tree search
+boosts reasoning via iterative preference learning.arXiv
+preprint arXiv:2405.00451, 2024.
+[Xieet al., 2024b ] Yuxi Xie, Guanzhen Li, Xiao Xu, and
+Min-Yen Kan. V-dpo: Mitigating hallucination in large vi-
+sion language models via vision-guided direct preference
+optimization.arXiv preprint arXiv:2411.02712, 2024.
+[Yanget al., 2025a ] An Yang, Anfeng Li, Baosong Yang,
+Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu,
+Chang Gao, Chengen Huang, Chenxu Lv, et al. Qwen3
+technical report.arXiv preprint arXiv:2505.09388, 2025.
+[Yanget al., 2025b ] Chenxu Yang, Ruipeng Jia, Mingyu
+Zheng, Naibin Gu, Zheng Lin, Siyuan Chen, Weichong
+Yin, Hua Wu, and Weiping Wang. Weights-rotated prefer-
+ence optimization for large language models. In Christos
+Christodoulopoulos, Tanmoy Chakraborty, Carolyn Rose,
+and Violet Peng, editors,Proceedings of the 2025 Confer-
+ence on Empirical Methods in Natural Language Process-
+ing, pages 26152–26175, Suzhou, China, November 2025.
+Association for Computational Linguistics.
+
+===== PAGE 10 =====
+[Yanget al., 2025c ] Chenxu Yang, Qingyi Si, Mz Dai,
+Dingyu Yao, Mingyu Zheng, Minghui Chen, Zheng Lin,
+and Weiping Wang. Test-time prompt intervention, 2025.
+[Yanget al., 2025d ] Chenxu Yang, Qingyi Si, Yongjie Duan,
+Zheliang Zhu, Chenyu Zhu, Qiaowei Li, Minghui Chen,
+Zheng Lin, and Weiping Wang. Dynamic early exit in rea-
+soning models, 2025.
+[Yanget al., 2025e ] Chenxu Yang, Qingyi Si, and Zheng
+Lin. Breaking the trade-off between faithfulness and ex-
+pressiveness for large language models, 2025.
+[Yanget al., 2026a ] Chenxu Yang, Chuanyu Qin, Qingyi Si,
+Minghui Chen, Naibin Gu, Dingyu Yao, Zheng Lin, Weip-
+ing Wang, Jiaqi Wang, and Nan Duan. Self-distilled rlvr,
+2026.
+[Yanget al., 2026b ] Chenxu Yang, Qingyi Si, Chong Tian,
+Xiyu Liu, Dingyu Yao, Chuanyu Qin, Zheng Lin, Weiping
+Wang, and Jiaqi Wang. System 1&2 synergy via dynamic
+model interpolation.arXiv preprint arXiv:2601.21414,
+2026.
+[Yeet al., 2024 ] Qinghao Ye, Haiyang Xu, Jiabo Ye, Ming
+Yan, Anwen Hu, Haowei Liu, Qi Qian, Ji Zhang, and Fei
+Huang. mplug-owl2: Revolutionizing multi-modal large
+language model with modality collaboration. InProceed-
+ings of the ieee/cvf conference on computer vision and pat-
+tern recognition, pages 13040–13051, 2024.
+[Yinet al., 2024 ] Shukang Yin, Chaoyou Fu, Sirui Zhao,
+Tong Xu, Hao Wang, Dianbo Sui, Yunhang Shen, Ke Li,
+Xing Sun, and Enhong Chen. Woodpecker: Hallucination
+correction for multimodal large language models.Science
+China Information Sciences, 67(12):220105, 2024.
+[Yuet al., 2023 ] Weihao Yu, Zhengyuan Yang, Linjie Li,
+Jianfeng Wang, Kevin Lin, Zicheng Liu, Xinchao Wang,
+and Lijuan Wang. Mm-vet: Evaluating large multi-
+modal models for integrated capabilities.arXiv preprint
+arXiv:2308.02490, 2023.
+[Yuanet al., 2024 ] Weizhe Yuan, Richard Yuanzhe Pang,
+Kyunghyun Cho, Xian Li, Sainbayar Sukhbaatar, Jing Xu,
+and Jason E Weston. Self-rewarding language models. In
+Forty-first International Conference on Machine Learning,
+2024.
+[Zhanget al., 2024 ] Di Zhang, Xiaoshui Huang, Dongzhan
+Zhou, Yuqiang Li, and Wanli Ouyang. Accessing
+gpt-4 level mathematical olympiad solutions via monte
+carlo tree self-refine with llama-3 8b.arXiv preprint
+arXiv:2406.07394, 2024.
+[Zhouet al., 2024 ] Yiyang Zhou, Chenhang Cui, Rafael
+Rafailov, Chelsea Finn, and Huaxiu Yao. Aligning modal-
+ities in vision large language models via preference fine-
+tuning.arXiv preprint arXiv:2402.11411, 2024.
+[Zhuet al., 2023 ] Deyao Zhu, Jun Chen, Xiaoqian Shen, Xi-
+ang Li, and Mohamed Elhoseiny. Minigpt-4: Enhancing
+vision-language understanding with advanced large lan-
+guage models.arXiv preprint arXiv:2304.10592, 2023.

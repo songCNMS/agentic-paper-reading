@@ -1,0 +1,79 @@
+[
+  {
+    "category": "Embodied / VLA agents",
+    "title": "Learning while Deploying: Fleet-Scale Reinforcement Learning for Generalist Robot Policies",
+    "arxiv_id": "2605.00416",
+    "why": "Fleet-scale offline-to-online RL framework for continual improvement of deployed VLA robot policies using autonomous rollouts and human interventions.",
+    "pdf": "2026-W19-agentic-assets/pdfs/2605.00416.pdf",
+    "text": "2026-W19-agentic-assets/texts/2605.00416.txt",
+    "pages": 18,
+    "status": "ok (downloaded)",
+    "error": ""
+  },
+  {
+    "category": "Agent skill representation",
+    "title": "From Skill Text to Skill Structure: The Scheduling-Structural-Logical Representation for Agent Skills",
+    "arxiv_id": "2604.24026",
+    "why": "Structured representation for reusable agent skills, improving skill discovery and risk assessment over text-only skill artifacts.",
+    "pdf": "2026-W19-agentic-assets/pdfs/2604.24026.pdf",
+    "text": "2026-W19-agentic-assets/texts/2604.24026.txt",
+    "pages": 22,
+    "status": "ok (downloaded)",
+    "error": ""
+  },
+  {
+    "category": "Environment / world generation",
+    "title": "Map2World: Segment Map Conditioned Text to 3D World Generation",
+    "arxiv_id": "2605.00781",
+    "why": "Generates controllable, scale-consistent 3D worlds that can support simulation and environment construction for embodied or autonomous agents.",
+    "pdf": "2026-W19-agentic-assets/pdfs/2605.00781.pdf",
+    "text": "2026-W19-agentic-assets/texts/2605.00781.txt",
+    "pages": 31,
+    "status": "ok (downloaded)",
+    "error": ""
+  },
+  {
+    "category": "Agent safety / self-calibration",
+    "title": "Online Self-Calibration Against Hallucination in Vision-Language Models",
+    "arxiv_id": "2605.00323",
+    "why": "Uses Monte Carlo Tree Search, reward mechanisms, and online preference optimization to reduce hallucination in multimodal models used by autonomous agents.",
+    "pdf": "2026-W19-agentic-assets/pdfs/2605.00323.pdf",
+    "text": "2026-W19-agentic-assets/texts/2605.00323.txt",
+    "pages": 10,
+    "status": "ok (downloaded)",
+    "error": ""
+  },
+  {
+    "category": "Multi-agent systems",
+    "title": "Learning to Act and Cooperate for Distributed Black-Box Consensus Optimization",
+    "arxiv_id": "2605.00691",
+    "why": "LLM-guided framework for shaping internal actions and external cooperation patterns in distributed multi-agent optimization.",
+    "pdf": "2026-W19-agentic-assets/pdfs/2605.00691.pdf",
+    "text": "2026-W19-agentic-assets/texts/2605.00691.txt",
+    "pages": 20,
+    "status": "ok (reparsed with replacement for PDF surrogate text)",
+    "error": ""
+  },
+  {
+    "category": "Retrieval / domain agents",
+    "title": "AnalogRetriever: Learning Cross-Modal Representations for Analog Circuit Retrieval",
+    "arxiv_id": "2604.23195",
+    "why": "Cross-modal retrieval dataset and model integrated into the AnalogCoder agentic framework as a retrieval-augmented generation module.",
+    "pdf": "2026-W19-agentic-assets/pdfs/2604.23195.pdf",
+    "text": "2026-W19-agentic-assets/texts/2604.23195.txt",
+    "pages": 10,
+    "status": "ok (downloaded)",
+    "error": ""
+  },
+  {
+    "category": "Reward modeling / code agents",
+    "title": "Themis: Training Robust Multilingual Code Reward Models for Flexible Multi-Criteria Scoring",
+    "arxiv_id": "2605.00754",
+    "why": "Introduces code reward-model benchmarks and a large preference dataset for multi-criteria scoring, useful for training and evaluating coding agents.",
+    "pdf": "2026-W19-agentic-assets/pdfs/2605.00754.pdf",
+    "text": "2026-W19-agentic-assets/texts/2605.00754.txt",
+    "pages": 54,
+    "status": "ok (downloaded)",
+    "error": ""
+  }
+]

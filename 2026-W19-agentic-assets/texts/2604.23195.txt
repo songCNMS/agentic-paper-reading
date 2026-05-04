@@ -1,0 +1,1157 @@
+
+
+===== PAGE 1 =====
+AnalogRetriever: Learning Cross-Modal
+Representations for Analog Circuit Retrieval
+Yihan Wang∗
+Tsinghua University
+Beijing, China
+yihan-
+wa23@mails.tsinghua.edu.cn
+Lei Li∗
+The University of Hong Kong
+Hong Kong, China
+nlp.lilei@gmail.com
+Yao Lai
+University of Cambridge
+Cambridge, United Kingdom
+yl2204@cam.ac.uk
+Jing Wang†
+Nanjing University of Posts and
+Telecommunications
+Nanjing, China
+wangjing25@njupt.edu.cn
+Yan Lu†
+Tsinghua University
+Beijing, China
+yanlu@tsinghua.edu.cn
+Abstract
+Analog circuit design relies heavily on reusing existing in-
+tellectual property (IP), yet searching across heterogeneous
+representations such as SPICE netlists, schematics, and func-
+tional descriptions remains challenging. Existing methods
+are largely limited to exact matching within a single modal-
+ity, failing to capture cross-modal semantic relationships. To
+bridge this gap, we present AnalogRetriever, a unified tri-
+modal retrieval framework for analog circuit search. We first
+build a high-quality dataset on top of Masala-CHAI through
+a two-stage repair pipeline that raises the netlist compile rate
+from 22% to 100%. Built on this foundation, AnalogRetriever
+encodes schematics and descriptions with a vision-language
+model and netlists with a port-aware relational graph convo-
+lutional network, mapping all three modalities into a shared
+embedding space via curriculum contrastive learning. Ex-
+periments show that AnalogRetriever achieves an average
+Recall@1 of 75.2% across all six cross-modal retrieval direc-
+tions, significantly outperforming existing baselines. When
+integrated into the AnalogCoder agentic framework as a
+retrieval-augmented generation module, it consistently im-
+proves functional pass rates and enables previously unsolved
+tasks to be completed. Our code and dataset will be released.
+1 Introduction
+Recent advances in large language models (LLMs) have
+opened new opportunities for analog circuit design automa-
+tion. Existing efforts focus ongenerativeapproaches that
+synthesize designs from specifications [ 1–6] or generate
+netlists from schematic images [7, 8], but they suffer from
+hallucination, invalid topologies, and difficulty incorporating
+domain-specific constraints.
+*Equal Contribution. †Corresponding authors.
+Traditional Analog Design Flow Proposed AnalogRetriever-driven Flow
+ 
+ 
+Design Requirements
+trieveAnalogRe r
+ 
+    
+  
+Manual Search in Reference Sources
+   
+Find Candidate Schematic
+   
+Manual Implementation in Virtuoso
+ 
+ 
+Generate Netlist and Simulation
+Reference
+Final Design
+Manuals
+ 
+ 
+Textbooks/
+Papers
+Online Forums/
+Prior Designs
+ 
+Text
+Tuning/
+Redesign
+Encoder
+ Schematic
+Image Encoder
+   
+Netlist GNN
+Encoder
+  
+Shared Semantic Embedding Space
+  
+Cross-Modal Retrieval
+ 
+RAG with AnalogCoder
+     
+Design Requirements
+“Design a two-stage OTA with ...
+Final Design
+“
+Description
+Schematic
+SPICE
+Description
+Schematic
+SPICE
+Netist
+Description
+Schematic
+SPICE
+NetistNetist
+(b)(a)
+   Top-K Retrieved References
+Figure 1. Motivation for AnalogRetriever. (a) In tradi-
+tional analog design, engineers manually search across
+fragmented sources using keyword matching, followed
+by time-consuming trial-and-error implementation.
+(b) AnalogRetriever maps text descriptions, schematic
+images, and SPICE netlists into a shared semantic em-
+bedding space, enabling unified cross-modal retrieval
+and downstream design generation via RAG.
+In contrast,retrieval-basedapproaches for analog design
+remain largely unexplored despite their practical potential.
+As shown in Fig. 1(a), junior engineers today spend consid-
+erable time manually searching design manuals, papers, and
+internal repositories with keyword queries, a process that
+is time-consuming, expertise-heavy, and especially hard for
+newcomers who may not know the right terminology. The
+challenge is compounded by the heterogeneous nature of
+the circuit representations: the same circuit exists as a SPICE
+netlist (code), a schematic (image), or a functional descrip-
+tion (text), yet conventional tools support only single-modal
+keyword matching [9].
+1
+arXiv:2604.23195v1  [cs.CV]  25 Apr 2026
+
+===== PAGE 2 =====
+Unlike digital design, which benefits from mature syn-
+thesis and automation flows, analog design relies heavily
+on reusing proven topologies accumulated through years of
+engineering experience [10, 11]. An effective cross-modal
+retrieval system would let engineers describe requirements
+in natural language and obtain matching schematics and
+netlists (Fig. 1(b)), accelerating design exploration, facili-
+tating IP reuse, and lowering the entry barrier for junior
+designers. Such a system also complements generative meth-
+ods through retrieval-augmented generation (RAG), where
+verified existing designs ground LLM outputs and mitigate
+hallucination. However, building it requires bridging the rep-
+resentational gap between netlists (graph-structured code),
+schematics (images), and functional descriptions (text), a
+cross-modal alignment challenge that no existing method
+addresses.
+To address this gap, we proposeAnalogRetriever, a tri-
+modal retrieval framework that maps functional descrip-
+tions, schematics, and SPICE netlists into a unified seman-
+tic space via contrastive learning [12]. This enables flexible
+cross-modal retrieval: a natural-language query such as “a
+two-stage op-amp with Miller compensation” returns match-
+ing schematics and netlists, and a schematic or netlist query
+returns functionally similar designs with their specifications.
+Building this framework requires addressing two key chal-
+lenges that no existing method tackles jointly.
+(C1) Domain gap for vision-language alignment.Pre-
+trained vision-language models (VLMs) such as CLIP [ 13]
+excel at aligning natural photographs with captions but do
+not generalize to abstract circuit schematics, as evidenced by
+near-random zero-shot retrieval (Avg R@1 = 2.5%, Table 2).
+Circuit schematics are clean line drawings with domain-
+specific symbols outside CLIP’s pretraining distribution, and
+the largest public dataset (MASALA-Chai) suffers from se-
+vere quality issues: only 22% of netlists compile, hindering
+effective fine-tuning.
+(C2) Graph-structured netlists and fine-grained
+discrimination.SPICE netlists are fundamentally graph-
+structured: node names are arbitrary, topology is implicit
+in connectivity, and standard text encoders cannot capture
+these structural semantics. Moreover, circuits in the same
+functional category (e.g., different op-amp topologies) share
+similar descriptions but differ substantially in implemen-
+tation, making it easy for a contrastive model to conflate
+them.
+To tackle C1, we refine MASALA-Chai through a two-
+stage LLM-based repair pipeline and freeze the lower CLIP
+layers for domain adaptation without catastrophic forgetting.
+To tackle C2, we employ a port-aware Relational Graph Con-
+volutional Network (RGCN) encoder with curriculum-guided
+hard-negative mining.
+We evaluate AnalogRetriever on a curated MASALA-
+Chai [8], where our two-stage repair pipeline yields 6,354
+verified triplets with near-100% compilation and DC pass
+rate. AnalogRetriever achieves an average R@1 of75 .2%
+across all six cross-modal directions, outperforming the
+strongest baseline (CROP [14], Avg R@1= 4.7%) by over15×.
+On the Text→Code direction, it reaches75 .6%R@1 versus
+9.5%, a +66.1pp gain. Introducing the code modality yields
+mutual enhancement: even Text↔Image directions improve
+by up to +8.7R@1. When integrated with AnalogCoder
+via RAG, it lifts functional correctness onall eightLLMs
+(averaging +5.6%) and sets a new state of the art of86 .7%on
+Claude Sonnet 4.6.
+Our main contributions are:(1) Tri-Modal Topology-
+Aware Retrieval.We propose AnalogRetriever, which com-
+bines a pretrained VLM with a topology-aware graph neu-
+ral network (GNN) encoder through tri-modal contrastive
+learning to enable the first cross-modal search across text,
+schematics, and SPICE netlists.(2) Curriculum-Guided
+Hard Negative Mining.A training strategy that progres-
+sively increases intra-cluster negatives based on functional
+category, sharpening discrimination among structurally dis-
+tinct circuits with similar functionality.(3) High-Quality
+Tri-Modal Dataset.A two-stage LLM-based refinement
+pipeline that audits and repairs MASALA-Chai, producing
+6,354 verified triplets to be released upon acceptance.
+2 Related Work
+Prior work relevant to AnalogRetriever spans three areas:
+circuit dataset construction and schematic-netlist conversion
+(§2.1), LLM-based analog circuit design (§2.2), and cross-
+modal retrieval with contrastive learning (§2.3). No existing
+work addresses all three modalities (text, schematics, and
+netlists) within a single retrieval framework.
+2.1 Schematic-Netlist Conversion
+AMSNet [ 15] and AMSNet 2.0 [ 16] pioneered automatic
+schematic-to-netlist conversion. MASALA-Chai [8] scaled
+dataset creation via end-to-end SPICE generation from
+schematics, and Image2Net [ 7] contributed more diverse
+pairs. Wang et al. [17] showed that topology-aware encoders
+capture circuit semantics beyond structural similarity, and
+Netlistify [ 18] tackled deterministic schematic-to-netlist
+conversion through component recognition. Our framework
+extends these topology-aware representations to align
+netlists with schematics and text via contrastive learning.
+2.2 LLMs for Analog Circuit Design
+AnalogCoder [ 1] introduced the first training-free LLM
+agent for analog design via Python code generation;
+AnalogCoder-Pro [2] extended it with multimodal topology
+2
+
+===== PAGE 3 =====
+synthesis. AnalogXpert [19] formulates topology synthesis
+as subcircuit-level SPICE generation, AnalogSeeker [ 20]
+builds a domain-specific foundation model, LaMAGIC [ 3]
+casts topology generation as language modelling, Artisan [4]
+automates op-amp design end-to-end, and AnalogGenie [5]
+explicitly explores the topology space. These methods
+focus on circuitgenerationbut suffer from hallucination
+and invalid topologies. Our retrieval component grounds
+LLM-based tools with relevant circuit examples via RAG,
+reducing invalid outputs.
+2.3 Cross-Modal Retrieval and Contrastive
+Learning
+Contrastive vision-language pretraining [12, 13] has become
+the de facto approach for aligning heterogeneous modalities,
+but its direct application to circuit data is fundamentally
+limited: SPICE netlists are graph-structured with arbitrary
+node names, and circuits sharing similar descriptions can
+differ substantially at the device level. Graph neural networks
+for EDA [17, 21, 22] recover structural semantics from netlists
+but are typically trained in isolation, without alignment to
+natural language or schematics. To our knowledge, no prior
+work establishes a single representation space that bridges
+all three analog circuit modalities;AnalogRetrievercloses
+this gap and supports all six cross-modal directions with a
+unified training objective.
+3 Method
+Fig. 2 overviews the AnalogRetriever framework. We for-
+malize the problem (§3.1), describe the modality-specific
+encoders (§3.2), present the tri-modal contrastive objective
+(§3.3), and detail the three-phase curriculum training (§3.4).
+3.1 Problem Formulation
+We formulate analog circuit retrieval as a tri-modal match-
+ing problem across SPICE netlist code C, functional text de-
+scriptions T , and schematic images I. Given a dataset D=
+{(𝑐 𝑖, 𝑡𝑖, 𝑠𝑖 )} 𝑁
+𝑖=1 of 𝑁 aligned triplets (code, text, schematic
+image), we learn three encoders 𝑓C, 𝑓 T, 𝑓I that map each
+modality into a shared 𝑑-dimensional embedding space R𝑑
+where semantically related items cluster together. At infer-
+ence, a query from any modality retrieves top-𝐾 items from
+any target modality via cosine similarity, covering all six
+cross-modal directions (C↔I, C↔T, I↔T).
+3.2 Tri-Modal Encoding Architecture
+Vision-Language Encoding with CLIP.We encode
+schematic images and textual descriptions with the
+pretrained CLIP [ 13] vision-language model: a Vision
+Transformer (ViT)-L/14 [ 23] image encoder 𝑓I and a
+Transformer [24] text encoder 𝑓T, both projecting into a
+Text
+Netlist
+Image
+“A CMOS differential 
+amplifier with active 
+load”
+VDD vdd 0 3.3
+M1 out  out vdd vdd PMOS
+M2 vout out vdd vdd PMOS
+M3 out  inp tail 0 NMOS
+M4 vout inn tail 0 NMOS
+M5 tail vb 0 0 NMOS
+Vision Encoder
+Text Encoder
+Graph Encoder
+Unified Space
+Image
+Embedding
+Text
+Embedding
+Graph
+Embedding
+OpenAI CLIP 
+Pretrained
+Pull
+(non-matching)
+Push
+(matching)
+Image
+Text
+Netlist
+Figure 2. AnalogRetriever framework. Three modality-
+specific encoders map SPICE netlists (port-aware
+RGCN), schematic images (ViT), and text descriptions
+(Transformer) into a shared embedding space, trained
+with tri-modal contrastive learning, auxiliary circuit-
+type classification, and three-phase curriculum with
+hard-negative mining.
+shared 𝑑=768space. To preserve the pretrained cross-modal
+alignment while allowing domain adaptation to clean circuit
+line drawings, we freeze the bottom 16 of 24 ViT blocks and
+fine-tune only the top 8, avoiding catastrophic forgetting of
+CLIP’s general visual-semantic prior.
+Port-A ware Relational Graph Netlist Encoding.SPICE
+netlists are graph-structured: components are nodes and
+electrical connections are edges. Crucially, different termi-
+nals on the same device carry distinct electrical semantics:
+connecting to the gate versus the drain of a MOSFET implies
+a control input rather than a current path. Standard Graph
+Convolutional Networks (GCNs) [21] with a single shared
+edge weight cannot distinguish these port-level differences,
+confusing functionally distinct circuits that share the same
+topology. We therefore adopt a Relational GCN (RGCN) [22]
+with a separate learnable weight matrix per edge type. As
+shown in Sec. 4.3, replacing GCN with RGCN brings the
+largest gains on code-involved retrieval directions (e.g., +2.3
+R@1 on I→C and +1.4on T →C), precisely where port-level
+semantics matter most.
+Each netlist 𝑐𝑖 is parsed into a graph 𝐺𝑖 =(V𝑖,E 𝑖,R) with
+|R |=20edge types covering all device terminals: MOSFET
+(drain/gate/source/bulk), BJT (collector/base/emitter), source
+(±), diode (anode/cathode), passive R/C/L terminals, four
+controlled-source ports,shared_netfor device–device con-
+nections on the same electrical net, andsubckt_terminalfor
+subcircuit interfaces. This port-level vocabulary lets the en-
+coder distinguish, e.g., a MOSFET whose drain feeds the
+next stage from one whose source does, which is essential
+for telling a common-source stage apart from a source fol-
+lower. Each node feature fuses a discrete component-type
+3
+
+===== PAGE 4 =====
+embedding with a log-normalized continuous parameter vec-
+tor (e.g.,𝑊/𝐿ratios, resistance, capacitance):
+h(0)
+𝑣 =W fuse
+
+Emb(𝑥 type) ∥Linear(log(1+𝑥 cont))
+
+(1)
+whereW fuse is a learnable fusion matrix,Emb(·) is a discrete
+embedding lookup, 𝑥type is the component type, 𝑥cont is the
+continuous parameter vector, and∥denotes concatenation.
+Port-aware message passing at layer𝑙is
+h(𝑙+1)
+𝑣 =𝜎
+ ∑︁
+𝑟∈ R
+∑︁
+𝑢∈ N𝑟 (𝑣)
+1
+|N𝑟 (𝑣)| W(𝑙)
+𝑟 h(𝑙)
+𝑢
+!
++h (𝑙)
+𝑣 ,(2)
+where N𝑟 (𝑣) is the set of neighbors of node 𝑣 under relation
+type 𝑟,W (𝑙)
+𝑟 is the relation-specific weight matrix at layer 𝑙,
+and 𝜎 denotes the GELU activation. Each layer further ap-
+plies GraphNorm [25] and a residual connection to stabilize
+gradient flow. We use𝐿=2layers: a two-hop receptive field
+is sufficient to capture the canonical subcircuit patterns that
+dominate analog topologies (differential pairs, current mir-
+rors, cascode stacks typically span one or two device hops).
+Deeper message passing empirically yields no additional
+gain and amplifies oversmoothing.
+A learnable attention pool then aggregates node embed-
+dings into a graph-level vector, letting the model up-weight
+functionally critical devices (input pairs, output stages, bias
+references) and down-weight boilerplate components:
+g𝑖 =
+∑︁
+𝑣∈ V𝑖
+𝛼𝑣h(𝐿)
+𝑣 , 𝛼 𝑣 ∝exp(w ⊤h(𝐿)
+𝑣 ),(3)
+wherewis a learnable attention vector. Compared with uni-
+form sum or mean pooling, attention pooling gives the graph
+embedding a clearer notion ofwhich transistors matterfor
+a given functional role. Finally, a two-layer multi-layer per-
+ceptron (MLP) projection head ( 𝑑𝑔→1024→𝑑, where 𝑑𝑔 is
+the RGCN hidden dimension) with LayerNorm, GELU ac-
+tivation, and dropout (𝑝=0.1) mapsg 𝑖 into the CLIP space,
+v(𝑐)
+𝑖 =𝑓C (𝑐𝑖 )=MLPproj(g𝑖 ), followed by ℓ2 normalization. The
+nonlinear projection provides extra capacity to bridge the
+representation gap between the graph and vision-language
+domains without perturbing the pretrained CLIP space.
+3.3 Tri-Modal Contrastive Learning
+We align the three modalities with an InfoNCE-style [ 12]
+objective. Letv (𝑐)
+𝑖 , v(𝑠)
+𝑖 , v(𝑡)
+𝑖 denote the ℓ2-normalized em-
+beddings of the 𝑖-th code, schematic image, and text sam-
+ple, respectively. For a batch of 𝐵 triplets, the directional
+Code→Image loss is
+L C→I =− 1
+𝐵
+𝐵∑︁
+𝑖=1
+log exp(sim(v (𝑐)
+𝑖 ,v (𝑠)
+𝑖 )/𝜏)
+Í𝐵
+𝑗=1 exp(sim(v (𝑐)
+𝑖 ,v (𝑠)
+𝑗 )/𝜏)
+(4)
+where sim(·,·) denotes cosine similarity and 𝜏 is a learnable
+temperature. The full tri-modal loss sums all six directions
+across the three modality pairs:
+Ltri =
+∑︁
+(𝑎,𝑏) ∈ P
+ L𝑎→𝑏 + L𝑏→𝑎
+,P={(C,I),(T,I),(C,T )}.
+(5)
+We apply label smoothing 𝜖=0.1, which we find especially
+helpful when training with intra-cluster hard negatives. Im-
+portantly, this tri-modal objective producesmutual enhance-
+ment: aligning the code modality into the shared space pro-
+vides complementary topological cues that also improve the
+originally bi-modal Image↔Text directions (up to+8.7R@1;
+Section 4.3), confirming that the three modalities’ semantics
+can be jointly aligned for mutual benefit.
+Circuit Type Classification Auxiliary Loss.Contrastive
+learning aligns individual triplets but does not explicitly
+enforce that the embedding space captures high-level
+topology categories. We therefore add an auxiliary classifier
+that predicts one of 19 canonical analog topologies, covering
+the major amplifier, current mirror, op-amp/operational
+transconductance amplifier (OTA), bandgap, voltage-
+controlled oscillator (VCO), comparator, low-dropout
+regulator (LDO), filter, and passive-network families, with
+labels obtained via LLM annotation. A shared two-layer
+MLP 𝑓cls (𝑑→256→19) is applied to both text and code
+embeddings:
+Lcls = 1
+2
+
+CE(𝑓 cls(v (𝑡) ), 𝑦) +CE(𝑓 cls (v (𝑐) ), 𝑦)
+
+,(6)
+where CE denotes cross-entropy loss and 𝑦 is the ground-
+truth circuit-type label, encouraging the two modalities to
+encode consistent topology information. The total loss is
+Ltotal=Lalign +𝜆L cls with 𝜆=0.5; Lalign varies by training
+phase below.
+3.4 Three-Phase Curriculum Training
+Jointly training a randomly initialized RGCN with pretrained
+CLIP is unstable: low-quality graph embeddings disrupt the
+pretrained alignment, and hard negatives amplify this insta-
+bility before cross-modal correspondence is even established.
+We address this with the three-phase curriculum illustrated
+in Fig. 3, which progressively increases both the number of
+trainable parameters (RGCN → RGCN+CLIP) and the sam-
+ple difficulty (𝛼0=0.05 →𝛼 max=0.3) as training proceeds. The
+figure also makes explicit which loss is active in each phase:
+Phase 1 uses only the code-involved losses L𝐼↔𝐶 +L𝑇↔𝐶 ,
+while Phases 2 and 3 use the full 6-way tri-modal lossL tri.
+Phase 1: Graph Encoder Warm-Up.Only the RGCN is
+trained; both CLIP encoders are frozen. The alignment loss
+uses only the code-involved directions,Lalign=L𝐼↔𝐶 +L𝑇↔𝐶 ,
+with random in-batch sampling (no hard negatives). This
+lets the graph encoder align to the existing CLIP space
+without perturbing its pretrained structure.
+4
+
+===== PAGE 5 =====
+Phase 3: Curriculum 
+Hard Negative Mining
+Random Sampling (α = 0)
+Phase 1: 
+Graph Encoder Warm-Up
+Random Sampling Hard Negative Mining
+Phase 2:
+Transition
+𝑙𝑜𝑠𝑠 = ℒ𝐼
+ 𝐶 + ℒ 𝑇
+ 𝐶
+Embedding 
+Space
+AdamW Optimizer
+Independent LR Schedule
+Contrastive Loss
+Full 6-Way
+Contrastive Loss
+& State Reset
+(RGCN)
+Encoder
+Agreement
+Maximize
+Graph
+Vision
+Encoder
+(ViT)
+ImageGraphText
+Encoder
+(Transformer)
+T ext
+𝑙𝑜𝑠𝑠 = ℒtri
+Graph
+Encoder
+(RGCN)
+Random Sampling
+𝑙𝑜𝑠𝑠 = ℒtri
+Embedding 
+Space
+(RGCN)
+Encoder
+Graph
+Vision
+Encoder
+(ViT)
+ImageText
+Encoder
+(Transformer)
+T ext
+Graph
+Encoder
+(RGCN)
+Graph
+Full 6-Way
+Contrastive Loss
+𝑙𝑜𝑠𝑠 = ℒtri
+Amplifiers
+Op-amps
+Oscillators
+Inverters
+Image
+T ext
+Graph
+Embedding Space
+Op-amp 1
+Op-amp 2
+Oscillator 1
+Hard
+Negative
+Easy
+Negative
+Push
+Pull
+Figure 3. Three-phase curriculum training. Phase 1
+warms up the graph encoder with frozen CLIP weights;
+Phase 2 enables full six-way contrastive learning with
+random negatives; Phase 3 introduces hard-negative
+mining to distinguish topologically similar circuits.
+Phase 2: Transition.We unfreeze CLIP and switch to the
+full 6-way loss Ltri while still using random sampling, so
+the model is not simultaneously asked to handle newly
+unfrozen parametersandhard negatives. The optimizer
+is rebuilt with fresh Adam state and an independent
+linear-warmup-then-cosine-decay schedule, establishing a
+stable joint-optimisation trajectory before hard negatives
+are introduced.
+Phase 3: Curriculum Hard Negative Mining.We cluster all
+circuits by their sentence-embedded captions using𝐾-means
+(𝐾=30) into functional clusters {G1, . . . ,G 𝐾 }. For a positive
+in cluster G𝑘, each batch samples an 𝛼𝑚 fraction of hard
+negatives from G𝑘 and the rest uniformly. The hard-negative
+ratio increases linearly:
+𝛼𝑚 =min  𝛼max, 𝛼 0 + 𝑚−1
+𝑀−1 (𝛼max −𝛼 0),(7)
+where 𝑚 is the current training epoch within Phase 3, 𝑀
+is the total number of Phase-3 epochs, 𝛼0=0.05is the ini-
+tial hard-negative ratio, and 𝛼max=0.3is the maximum ratio.
+This schedule first consolidates coarse distinctions (amplifier
+vs. oscillator) and then progressively sharpens discrimina-
+tion among structurally distinct circuits serving similar func-
+tions, such as common-source vs. common-gate amplifiers
+or Miller-compensated vs. folded-cascode op-amps.
+4 Experiments
+We describe dataset curation (§4.1), training setup and base-
+lines (§4.2), main retrieval results with ablations (§4.3), and
+RAG integration into AnalogCoder (§4.4).
+4.1 Dataset Curation
+We build upon MASALA-Chai [8], the largest publicly avail-
+able tri-modal analog circuit dataset ( ≈6,500triplets). Our
+audit revealed severe quality issues: of the 6,371 schematic
+images, only 6,069 have paired SPICE netlists and captions,
+Raw 
+Dataset
+Ngspice Dataset 
+Screening
+Stage1:
+Initial Netlist Repair
+Stage2: 
+Feedback-Guided Refinement 
+High-Quality Dataset
+Buggy 
+circuit/netlist 
+files
+Original 
+textual 
+descriptions
+Preprocess SPICE netlist:
+standardize format,
+add title and .END
+Compile check: 
+validate syntax, models 
+and component validity via 
+Ngspice
+DC simulation check:
+run .op analysis, test 
+convergence and stability
+Batch evaluation:
+multi-threaded verification, 
+generate pass-rate 
+statistics
+Base Model(Round 1)
+Ngspice Validation
+DC 
+success?
+Coarse Repair
+Teacher Model(Round 2)
+Ngspice Validation 
+(Deep Validation)
+Final Repaired Netlist
+Simulator feedback
+Yes
+No
+• Refined description
+•  Round-1 failed netlist 
+•  DC error log
+loop
+Figure 4. Two-stage LLM-based dataset refinement
+pipeline. Stage 1 uses a base LLM for initial netlist
+repair with Ngspice validation. Stage 2 applies iterative
+feedback-guided refinement: a teacher model repairs
+failed cases using DC error logs until convergence.
+Stage 2a: Netlist Repair
+You are an expert SPICE engineer debugging a netlist that
+failed Ngspice compilation or DC simulation. Given the
+schematic image, the broken netlist, and the specific Ngspice
+error messages, return a corrected, compilable netlist that
+•resolves all reported syntax and reference errors,
+• provides .model statements for every semiconductor
+device,
+•preserves the original topology and function,
+•includes an.opanalysis and ends with.END.
+Output format:<NETLIST>. . .</NETLIST>.
+Stage 2b: Description Refinement
+You are an expert analog circuit engineer. Using the veri-
+fied SPICE netlist as ground truth (together with the original,
+possibly inaccurate caption), produceonetechnically precise
+sentence ( ≤60 words, max 77 CLIP tokens) that names the
+circuit type, lists the key components and their roles, and
+describes the primary operating principle. Output format:
+<DESCRIPTION>. . .</DESCRIPTION>.
+Figure 5. Stage 2 prompts: feedback-guided netlist re-
+pair and description refinement.
+and among those only 22.0% compile under Ngspice and
+a mere 11.4% pass a DC operating-point ( .op) check (Ta-
+ble 1). Common failure modes include undefined subcircuits,
+missing device models, and incorrect node connectivity, and
+many captions are generic boilerplate (“This is a circuit”) that
+does not reflect the actual topology.
+Our refinement pipeline shown in Fig. 4 has two cas-
+caded stages connected by an Ngspice simulator acting as
+the ground-truth oracle.
+5
+
+===== PAGE 6 =====
+Table 1. Dataset quality before and after our two-stage
+refinement.
+Stage # Triplets Compile (%) DC Pass (%)
+Original MASALA-Chai 6,069 22.0 11.4
++ Stage 1 (Initial Repair) 6,371 99.2 74.1
++ Stage 2 (Feedback Refinement) 6,371 100.0 99.7
+Final (after filtering) 6,354 100.0 100.0
+Stage 1: Initial Netlist Repair.As shown in the middle
+block of Fig. 4, each raw netlist is fed to GPT-5.4 [26] together
+with its Ngspice errors. Repaired netlists that compileand
+pass the DC check are committed to the high-quality set;
+DC failures are forwarded to Stage 2 with the error log. For
+the 302 samples originally missing a netlist or caption, the
+LLM synthesises both modalities from the schematic image,
+recovering all 6,371 triplets. Stage 1 alone raises the compile
+rate from 22.0% to 99.2% and the DC pass rate from 11.4% to
+74.1%.
+Stage 2: Feedback-Guided Refinement.For Stage-1 DC
+failures, we use the two prompts in Fig. 5: anetlist-repair
+prompt (Stage 2a) that fixes the broken netlist from the exact
+Ngspice error messages while preserving topology, and a
+description-refinementprompt (Stage 2b) that rewrites the
+caption from the now-verified netlist. At each iteration the
+model receives the failed netlist and DC error log and gener-
+ates a new candidate verified by Ngspice; updated feedback
+is appended on failure, for up to 𝐾max=5iterations. Stage 2
+lifts the compile rate to 100.0% and the DC pass rate to 99.7%
+(Table 1), ensuring text–circuit consistency. A before/after
+example appears in Fig. 6. After filtering unrecoverable sam-
+ples, we retain 6,354 high-quality triplets. Both stages use
+GPT-5.4 at temperature0.3, differing only in prompt template
+and inputs.
+4.2 Experimental Settings
+Preprocessing and Training.We hold out 1,000 triplets for
+testing and resize schematic images to224 ×224. Netlists
+are parsed into heterogeneous graphs with the 20 port
+types defined in Sec. 3.2. Functional clusters for the
+curriculum sampler are obtained by 𝐾-means (𝐾=30) on
+sentence-embedded captions, and circuit-type labels for
+the auxiliary classifier come from LLM annotation into 19
+canonical topologies. We use CLIP ViT-L/14 [13] (bottom 16
+of 24 blocks frozen), a two-layer RGCN [ 22] with hidden
+dim 512 and attention pooling, and a two-layer MLP into
+the 768-d CLIP space. Training follows the three-phase
+curriculum: Phase 1 (epoch 1–6) trains only the RGCN
+with CLIP frozen, Phase 2 (epoch 7–8) unfreezes CLIP
+with random sampling, and Phase 3 (epoch 9–20) activates
+curriculum hard-negative mining with 𝛼:0.05→0.3. We use
+AdamW (CLIP5 ×10−5, RGCN5 ×10−4), rebuilt at Phase 2
+* SPICE Netlist for the given schematic
+VCC 4  0   DC   2.5V
+R1   4   2   30k
+RC   4   3  2k
+R2   2   0   1k
+RE   1   0  100
+Q1   3   2   1   NPN
+The circuit in Figure 5.112 is a bipolar 
+junction transistor (BJT) biased in the 
+voltage-divider configuration. It consists of 
+a transistor Q1 with a base resistor RB = 2 
+kΩ, a collector resistor 3 kΩ, and a supply 
+voltage VCC = 2.5 V. This setup is 
+intended to keep Q1 in the active mode for 
+a beta (β) of 100, considering IS = 6x10-16 
+A and VA = ∞. 
+* === Net Legend ===
+* Net 0 - GND
+* Net 1 - VCC (+2.5V) Net 2 - base bias
+* Net 3 - collector  Net 4 - emitter
+V1   1   0   DC   2.5
+R1   1   2   30k
+R2   2   0   10k
+RC   1   3   2k
+Q1   3   2   4   NPNMOD
+RE   4   0   100
+.model NPNMOD NPN (IS=1E-15 BF=100)
+.end
+A voltage divider biased NPN 
+common emitter amplifier uses a 30 kΩ / 
+10 kΩ base-bias network from a 2.5 V 
+supply, a 2 kΩ collector load, and 100 Ω 
+emitter degeneration to set the quiescent 
+operating point.
+After: Repaired Netlist
+Before: Generic Caption After: Refined Description
+SPICE Netlist Comparison
+Functional Description Comparison
+Before: Original Netlist
+Figure 6. Before/after refinement. Top: SPICE netlist
+with errors and fixes. Bottom: generic vs. refined func-
+tional description.
+with an independent warmup, effective batch size 256, label
+smoothing 0.1, auxiliary weight 𝜆=0.5, and a learnable
+temperature initialised to1 /0.07. All experiments run on a
+single NVIDIA H200 GPU.
+Metrics and Baselines.We report Recall@ 𝐾 (𝐾∈{ 1, 5, 10})
+for all six cross-modal directions and the average R@1 over
+them. We compare against four external retrieval baselines:
+(i)CLIP[ 13] (raw SPICE fed to the off-the-shelf CLIP text
+encoder, a zero-shot lower bound); (ii)CROP[ 14] (netlists
+summarized by Qwen2.5-7B [ 27] then CLIP-embedded, a
+strong code-as-text baseline); (iii)ChatLS[ 28] (LLM-based
+structured netlist representations); and (iv)NetTAG[ 29]
+(graph-attribute tagging via device-level classification). Since
+CROP, ChatLS, and NetTAG only provide alternativecode
+representations while leaving the image and text encoders
+unchanged, all four external baselines share the same off-the-
+shelf CLIP image–text pathway; consequently their T→I and
+I→T recall values are identical. Internal ablation variantsTI
+(Bi-Modal),TIC (GCN), andTIC (RGCN)are reported in
+the main table for direct comparison of each design choice.
+4.3 Main Results and Ablation
+We present all results, including external baselines and in-
+ternal ablations, in Table 2 to facilitate direct comparison.
+Tri-modal alignment benefits bi-modal retrieval.On the
+shared Image↔Text directions, adding the code modality
+lifts T→I R@1 from 70.5% to78.2%(+7.7) and I →T from
+69.8% to78.5%(+8.7), despite using the same CLIP backbone
+and identical image–text data. The code modality provides
+6
+
+===== PAGE 7 =====
+Table 2. Cross-modal retrieval performance on the test set ( 𝑁=1,000). I: Image (schematic), T: Text (description), C:
+Circuit (netlist). The upper block shows external baselines; the lower block shows our ablations. TI: Text–Image
+bi-modal baseline (CLIP fine-tuned on analog circuit pairs). TIC: tri-modal variants with GCN or port-aware RGCN
+encoder. AnalogRetriever: full model with RGCN and curriculum learning. Avg R@1 is the mean R@1 over all six
+retrieval directions. Best per column in bold.
+I→C T→I T→C C→I I→T C→T Avg
+ModelR@1 R@5 R@10 R@1 R@5 R@10 R@1 R@5 R@10 R@1 R@5 R@10 R@1 R@5 R@10 R@1 R@5 R@10R@1
+CLIP [13] 1.2 4.6 8.9 2.2 8.2 13.5 2.9 9.7 16.2 2.9 10.1 15.7 2.7 7.6 12.9 3.2 11.2 17.4 2.5
+CROP [14] 2.3 8.4 15.0 2.2 8.2 13.5 9.2 25.8 37.1 2.4 8.5 14.2 2.7 7.6 12.9 9.4 24.7 33.0 4.7
+ChatLS [28] 0.9 5.9 11.3 2.2 8.2 13.5 9.5 24.0 35.1 1.6 6.6 10.0 2.7 7.6 12.9 7.2 20.4 31.3 4.0
+NetTAG [29] 0.2 2.5 4.5 2.2 8.2 13.5 0.5 3.4 6.8 0.1 1.4 4.1 2.7 7.6 12.9 0.4 3.4 7.1 1.0
+TI (Bi-Modal) – – – 70.5 92.9 96.8 – – – – – – 69.8 94.1 96.7 – – – –
+TIC (GCN) 62.9 92.2 95.7 70.8 95.7 98.4 67.7 95.7 99.0 60.9 91.6 95.6 71.3 96.4 98.8 65.5 95.7 98.9 66.5
+TIC (RGCN) 65.2 92.5 96.8 71.8 96.298.869.196.4 99.261.9 92.9 96.7 71.196.7 98.967.3 96.499.067.7
+AnalogRetriever74.7 95.5 98.1 78.2 96.8 97.9 75.6 96.3 98.6 72.0 94.8 97.9 78.5 96.7 98.3 72.4 96.7 98.3 75.2
+complementary topological cues that regularize the shared
+space. Notably, naively adding the graph encoder (TIC vs.
+TI) barely moves T2I (70.5→70.8): a freshly initialized RGCN
+initially perturbs the pretrained CLIP alignment, and the
+gains only materialize after the curriculum stabilizes joint
+optimization.
+Curriculum learning yields consistent gains.Comparing
+TIC (RGCN) (no curriculum) with the full AnalogRetriever,
+the three-phase curriculum with auxiliary classification
+yields uniform improvements across all six directions (+9.5
+on I→C, +10.1on C →I, +6.4on T →I, +7.4on I →T, +6.5
+on T→C, and +5.1on C →T). The largest gains appear on
+code-involveddirections, where the hard-negative sampler
+forces the model to distinguish circuits that share similar
+high-level descriptions but differ in transistor-level topology
+(e.g., a folded-cascode op-amp versus a two-stage Miller
+op-amp). Overall, average R@1 improves from 67.7% to
+75.2%(+7.5). Port-aware RGCN adds +1.6Avg R@1 over
+the edge-agnostic GCN by encoding device-port semantics.
+Every AnalogRetriever direction exceeds 94% at R@5 and
+97% at R@10, so a user query almost always places the
+correct circuit within the top-10 candidates.
+4.4 Retrieval-Augmented Generation
+To demonstrate practical utility, we integrate AnalogRe-
+triever into a retrieval-augmented generation (RAG) pipeline
+with AnalogCoder [1], a training-free LLM agent for analog
+design via PySpice code generation.
+RAG Pipeline.AnalogRetriever retrieves the top- 𝑘 SPICE
+netlists from a prebuilt FAISS index via Text→Code search.
+Retrieved netlists are converted to PySpice by a rule-based
+parserbeforeprompt injection, so in-context examples use
+the same API as the target code. A three-level filter removes
+irrelevant results via (1) similarity threshold, (2) device-type
+filter, and (3) topology-priority ranking.
+Table 3. Functional correctness (%) on the AnalogCoder
+benchmark (24 tasks × 5 trials) for eight LLMs, with
+and without AnalogRetriever.Δis the absolute gain.
+LLM Baseline +RAGΔ
+GPT-4o-mini 30.8 40.8+10.0
+Nemotron-120B 34.2 37.5 +3.3
+GPT-5.4-mini 65.0 67.5 +2.5
+Gemini-3-Flash 65.0 70.0 +5.0
+Kimi-K2 65.0 73.3 +8.3
+GLM-4.6 73.3 80.0 +6.7
+Qwen3.5-397B 78.3 85.0 +6.7
+Claude-Sonnet-4.6 84.286.7+2.5
+Average 62.0 67.6 +5.6
+Cross-Model Evaluation.We evaluate on AnalogCoder’s
+24-task benchmark (5 trials × 3 retries) across eight LLMs
+(Table 3). AnalogRetriever delivers a positive gain onall
+eightmodels, averaging+5.6%absolute (62.0% →67.6%).
+The largest gain is on GPT-4o-mini (+10.0); augmenting
+Claude Sonnet 4.6 reaches86.7%, a new state of the art. The
+benefitgeneralizes across model families and scales.
+Qualitative Case Studies.Fig. 7 shows two representative
+cases. In Task 9 (top row), Claude Sonnet 4.6 without
+RAG produces a diff-pair with a current-mirror load but
+no common-mode feedback, letting the high-impedance
+node drift into triode (0 /5). Grounded by a retrieved
+single-ended CMOS Miller op-amp, the LLM reproduces
+the canonical M1 →M3 topology with a Miller capacitor,
+reaching5 /5. In Task 17 (bottom row), GPT-5.4-mini without
+retrieval produces an incorrect RC network structure
+and leaves the feedback loop open, preventing oscillation
+(0/5). With a retrieved reference, the LLM constructs the
+correct Wien-bridge topology with a closed feedback loop,
+achieving4 /5success. Both cases demonstrate that retrieval
+provides the topological guidance needed to turn invalid
+outputs into functional circuits.
+7
+
+===== PAGE 8 =====
+Task 9 – Retrieved
+ Task 9 – Extended Query
+A two-stage CMOS Miller-compensated
+inverting amplifier with an NMOS
+common-source output stage and a
+PMOS common-source gain stage,
+biased by ideal current sources and a
+diode-connected PMOS bias device, with
+a Miller compensation capacitor between
+the intermediate node and the output.
+Task 9 – Failure
+ Task 9 – Success
+Task 17 – Retrieved
+ Task 17 – Extended Query
+A Wien Bridge oscillator using an op-amp
+with a series R-C and parallel R-C positive-
+feedback network and a resistive negative-
+feedback divider.
+Task 17 – Failure
+ Task 17 – Success
+VIN VCM
+VOUT
+VDD=5V
+M3
+W/L=40/1
+M4
+W/L=40/1
+M1
+W/L=20/1
+M2
+W/L=20/1
+M5
+W/L=20/1
+Vbias
+Cc=1pF
+R1=10kΩ
+M6
+W/L=40/1
+High-Z node, no CMFB
+VDD=5V
+M3
+W/L=100/1
+M1
+W/L=50/1
+M2
+W/L=100/1 R1=10kΩ
+Vbias=4V
+Vin=1V
+CC=2pF Vout
+Mid-rail bias by matched 
+M1/M2
+R2=10kΩ
+R3=10kΩ
+C1=10μF R1=10kΩ
+C2=10μF
+VDD=5V
+Rload=100kΩ
+VCM=2.5V
+Not a Wien Network
+Loop Open
+R2=10kΩ
+R4=10kΩ
+C1=10μF R1=10kΩ
+C2=10nF
+VDD=5V
+Rload=100kΩ
+R3=22kΩ
+VCM=2.5V
+Wien Network
+Loop Closed
+Figure 7. Case studies showing how retrieval improves LLM-based circuit generation. Task 9: Miller amplifier
+(Claude Sonnet 4.6,0 /5 → 5/5); Task 17: Wien-bridge oscillator (GPT-5.4-mini,0 /5 → 4/5). Without retrieval (Failure),
+the LLM produces structurally incorrect circuits (red annotations). With retrieval, the retrieved schematic provides
+a correct topological reference, enabling the LLM to generate functionally valid circuits (Success).
+Effect of Query Expansion.AnalogCoder task prompts are
+typically only 3–6 tokens long (e.g.,“A Wien Bridge oscilla-
+tor”), which CLIP’s text encoder maps to low-discriminative
+embeddings. Rewriting each task into a topology-aware spec-
+ification lifts relevant database entries from deep ranks to
+the top-𝑘 (e.g., the canonical Wien-bridge op-amp entries
+move from ranks 74/56/20 to 2/10/5; the Miller op-amp from
+rank 35 to rank 1). We therefore let GPT-5.4 rewrite every
+task once into a topology-aware paragraph before retrieval;
+the cost is amortized across all 24 tasks and negligible. Fig. 7
+visualizes both the extended query and its top-1 reference for
+each case study; all RAG results above use these expanded
+queries.
+5 Conclusion
+We presented AnalogRetriever, the first tri-modal retrieval
+model that aligns natural-language descriptions, schematic
+images, and SPICE netlists in a shared embedding space, sup-
+ported by a two-stage LLM-based refinement pipeline that
+lifts the MASALA-Chai DC pass rate from11.4%to99 .7%and
+yields6 ,354verified triplets. A port-aware RGCN encoder
+trained with a three-phase curriculum and hard-negative
+mining pushes average Recall@1 to 75.2% across all six
+cross-modal directions, outperforming the best prior baseline
+by over an order of magnitude. Plugged into AnalogCoder,
+AnalogRetriever delivers a positive functional-correctness
+gain onall eightevaluated LLMs (averaging +5.6%absolute)
+and sets a new state of the art of86.7% on Claude Sonnet 4.6,
+with the benefit generalizing across model families and pa-
+rameter scales rather than being tied to any specific LLM.
+Three findings from our experiments deserve particular
+emphasis. First,tri-modal training yields mutual enhance-
+ment: even the Image ↔Text directions, which share the
+same CLIP backbone and identical training data, improve
+by up to +8.7R@1 when the code modality is added. This
+confirms that the topological cues from the graph encoder
+regularize and enrich the shared embedding space in ways
+that benefit all modalities, not just the newly introduced one.
+Second,curriculum training is essential for stable joint opti-
+mization: naively adding the RGCN to CLIP barely moves
+performance (TIC vs. TI), because a randomly initialized
+graph encoder disrupts the pretrained alignment; only af-
+ter the three-phase curriculum are the gains fully realized
+(+7.5Avg R@1 over the non-curriculum variant). Third, our
+qualitative case studies show that a single high-quality re-
+trieved reference is often enough to re-anchor a generation
+that would otherwise commit to a topologically invalid cir-
+cuit family, turning complete failures into reliable successes,
+suggesting that retrieval and generation are complementary
+rather than competing paradigms for analog design automa-
+tion.
+8
+
+===== PAGE 9 =====
+Limitations and future work.Several directions remain
+open. (i) The current dataset covers 19 canonical analog
+topologies; extending to mixed-signal, RF, and power-
+management circuits would broaden applicability. (ii) The
+RGCN uses 20 hand-defined port types; learning the relation
+vocabulary from data could improve generalization to
+novel device technologies. (iii) As circuit databases grow
+to industrial scale, efficient nearest-neighbor search (e.g.,
+product quantization) becomes essential. We plan to release
+the curated dataset and model weights upon acceptance.
+9
+
+===== PAGE 10 =====
+References
+[1] Y. Lai, S. Lee, G. Chen, S. Poddar, M. Hu, D. Z. Pan, and
+P. Luo, “Analogcoder: Analog circuit design via training-free code
+generation, ”ArXiv, vol. abs/2405.14918, 2024. [Online]. Available:
+https://api.semanticscholar.org/CorpusID:270045319
+[2] Y. Lai, S. Poddar, S. Lee, G. Chen, M. Hu, B. Yu, P. Luo, and D. Z. Pan,
+“Analogcoder-pro: Unifying analog circuit generation and optimization
+via multi-modal llms, ”ArXiv, vol. abs/2508.02518, 2025. [Online].
+Available: https://api.semanticscholar.org/CorpusID:280422637
+[3] C.-C. Changet al., “LaMAGIC: Language-model-based topology gen-
+eration for analog integrated circuits, ” inInternational Conference on
+Machine Learning (ICML), 2024.
+[4] Z. Chenet al., “Artisan: Automated operational amplifier design via
+domain-specific large language model, ” inProceedings of the 61st
+ACM/IEEE Design Automation Conference (DAC). San Francisco,
+CA, USA: ACM, Jun. 2024, pp. 1–6.
+[5] J. Gao, W. Cao, J. Yang, and X. Zhang, “AnalogGenie: A generative
+engine for automatic discovery of analog circuit topologies, ” Feb. 2025.
+[6] J. Wang, Z. Li, L. Li, F. He, L. Lin, Y. Lai, Y. Li, X. Zeng, and Y. Guo,
+“Principle-guided verilog optimization: IP-Safe knowledge transfer via
+local-cloud collaboration, ”arXiv preprint arXiv:2508.05675, 2025.
+[7] H. Xu, C. Liu, Q. Wang, W. Huang, Y. Xu, W. Chen, A. Peng,
+Z. Li, B. Li, L. Qi, J. Yang, Y. Du, and L. Du, “Image2net:
+Datasets, benchmark and hybrid framework to convert analog circuit
+diagrams into netlists, ”2025 International Symposium of Electronics
+Design Automation (ISEDA), pp. 807–816, 2025. [Online]. Available:
+https://api.semanticscholar.org/CorpusID:280553641
+[8] J. Bhandari, V. P. V. Bhat, Y. He, S. Garg, H. Rahmani, and R. Karri,
+“Masala-chai: A large-scale spice netlist dataset for analog circuits by
+harnessing ai, ”ArXiv, vol. abs/2411.14299, 2024. [Online]. Available:
+https://api.semanticscholar.org/CorpusID:274166126
+[9] Y. Pu, Z. He, T. Qiu, H. Wu, and B. Yu, “Customized retrieval aug-
+mented generation and benchmarking for eda tool documentation
+qa, ” inProceedings of the 43rd IEEE/ACM International Conference on
+Computer-Aided Design, 2024, pp. 1–9.
+[10] L. Chen, Y. Chen, C. Chuet al., “The dawn of ai-native eda: Opportuni-
+ties and challenges of large circuit models, ”ArXiv, vol. abs/2403.07257,
+2024.
+[11] R. Zhong, X. Du, S. Kai, Z. Tang, S. Xu, H.-L. Zhen, J. Hao, Q. Xu, M. jie
+Yuan, and J. Yan, “Llm4eda: Emerging progress in large language
+models for electronic design automation, ”ArXiv, vol. abs/2401.12224,
+2023. [Online]. Available: https://api.semanticscholar.org/CorpusID:
+267095366
+[12] A. v. d. Oord, Y. Li, and O. Vinyals, “Representation learning with
+contrastive predictive coding, ”arXiv preprint arXiv:1807.03748, 2018.
+[13] A. Radford, J. W. Kim, C. Hallacy, A. Ramesh, G. Goh, S. Agarwal,
+G. Sastry, A. Askell, P. Mishkin, J. Clark, G. Krueger, and I. Sutskever,
+“Learning transferable visual models from natural language supervi-
+sion, ” inICML, ser. Proceedings of Machine Learning Research, vol.
+139, 2021, pp. 8748–8763.
+[14] J. Panet al., “CROP: Circuit retrieval and optimization with parameter
+guidance using LLMs, ” in2025 IEEE/ACM International Conference on
+Computer Aided Design (ICCAD). Munich, Germany: IEEE, Oct. 2025,
+pp. 1–9.
+[15] Z. Tao, Y. Shi, Y. Huo, R. Ye, Z. Li, L. Huang, C. Wu, N. Bai, Z. Yu, T.-J.
+Lin, and L. He, “Amsnet: Netlist dataset for ams circuits, ”2024 IEEE
+LLM Aided Design Workshop (LAD), pp. 1–5, 2024. [Online]. Available:
+https://api.semanticscholar.org/CorpusID:269773064
+[16] Y. Shi, Z. Tao, Y. Gao, L. Huang, H. Wang, Z. Yu, T.-J. Lin, and
+L. He, “Amsnet 2.0: A large ams database with ai segmentation
+for net detection, ”2025 IEEE International Conference on LLM-
+Aided Design (ICLAD), pp. 242–248, 2025. [Online]. Available:
+https://api.semanticscholar.org/CorpusID:278602633
+[17] Z. Wang, C. Bai, Z. He, G. Zhang, Q. Xu, T.-Y. Ho, B. Yu, and Y. Huang,
+“Functionality matters in netlist representation learning, ” inProceed-
+ings of the 59th ACM/IEEE Design Automation Conference, 2022, pp.
+61–66.
+[18] C.-Y. Huang, H.-I. Chen, H.-W. Ho, P.-H. Kang, M. P.-H. Lin, W.-H. Liu,
+and H. Ren, “Netlistify: Transforming circuit schematics into netlists
+with deep learning. ” [Online]. Available: https://api.semanticscholar.
+org/CorpusID:281826794
+[19] H. Zhang, S. Sun, Y. Lin, R. Wang, and J. Bian, “Analogxpert:
+Automating analog topology synthesis by incorporating circuit design
+expertise into large language models, ”2025 International Symposium
+of Electronics Design Automation (ISEDA), pp. 772–777, 2024. [Online].
+Available: https://api.semanticscholar.org/CorpusID:275134444
+[20] Z. Chen, Z. Ji, J. Shen, X. Ke, X. Yang, M. Zhou, Z. Du, X. Yan,
+Z. Wu, Z. Xu, J. Huang, L. Shang, X. Zeng, and F. Yang,
+“Analogseeker: An open-source foundation language model for analog
+circuit design, ”ArXiv, vol. abs/2508.10409, 2025. [Online]. Available:
+https://api.semanticscholar.org/CorpusID:280650151
+[21] T. Kipf, “Semi-supervised classification with graph convolutional net-
+works, ”arXiv preprint arXiv:1609.02907, 2016.
+[22] M. Schlichtkrull, T. N. Kipf, P. Bloem, R. Van Den Berg, I. Titov, and
+M. Welling, “Modeling relational data with graph convolutional net-
+works, ” inEuropean semantic web conference. Springer, 2018, pp.
+593–607.
+[23] A. Dosovitskiy, L. Beyer, A. Kolesnikov, D. Weissenborn, X. Zhai,
+T. Unterthiner, M. Dehghani, M. Minderer, G. Heigold, S. Gellyet al.,
+“An image is worth 16x16 words: Transformers for image recognition
+at scale, ” inInternational Conference on Learning Representations.
+[24] A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez,
+L. Kaiser, and I. Polosukhin, “Attention is all you need, ” inNeurIPS,
+2017, pp. 5998–6008.
+[25] T. Cai, S. Luo, K. Xu, D. He, T.-y. Liu, and L. Wang, “Graphnorm: A
+principled approach to accelerating graph neural network training, ”
+inInternational Conference on Machine Learning. PMLR, 2021, pp.
+1204–1215.
+[26] OpenAI, “Introducing GPT-5.4, ” Mar. 2026, accessed: 2026-04-05.
+[Online]. Available: https://openai.com/index/introducing-gpt-5-4/
+[27] Q. Team, “Qwen2 technical report, ”ArXiv preprint, vol. abs/2407.10671,
+2024.
+[28] H. Zheng, H. Wu, and Z. He, “ChatLS: Multimodal retrieval-augmented
+generation and chain-of-thought for logic synthesis script customiza-
+tion, ” in2025 62nd ACM/IEEE Design Automation Conference (DAC).
+San Francisco, CA, USA: IEEE, Jun. 2025, pp. 1–7.
+[29] W. Fang, W. Li, S. Liu, Y. Lu, H. Zhang, and Z. Xie, “NetTAG: A
+multimodal rtl-and-layout-aligned netlist foundation model via text-
+attributed graph, ” Apr. 2025.
+10

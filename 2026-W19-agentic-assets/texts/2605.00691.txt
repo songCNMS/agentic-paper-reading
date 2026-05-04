@@ -1,0 +1,1798 @@
+
+
+===== PAGE 1 =====
+Learning to Act and Cooperate for Distributed Black-Box Consensus
+Optimization
+Zi-Bo Qin 1 Feng-Feng Wei1 Tai-You Chen1 Wei-Neng Chen 1
+Abstract
+Distributed black-box consensus optimization is
+a fundamental problem in multi-agent systems,
+where agents must improve a global objective us-
+ing only local objective queries and limited neigh-
+bor communication. Existing methods largely
+rely on handcrafted update rules and static co-
+operation patterns, which often struggle to bal-
+ance local adaptation, global coordination, and
+communication efficiency in heterogeneous non-
+convex environments. In this paper, we take an
+initial step toward trajectory-driven self-design
+for distributed black-box consensus optimization.
+We first redesign the agent-level swarm dynamics
+with an adaptive internal mechanism tailored to
+decentralized consensus settings, improving the
+balance between exploration, convergence, and lo-
+cal escape. Built on top of this adaptive execution
+layer, we propose Learning to Act and Cooper-
+ate (LAC-MAS), a trajectory-driven framework in
+which large language models provide sparse high-
+level guidance for shaping both agent-internal
+action behaviors and agent-external cooperation
+patterns from historical optimization trajectories.
+We further introduce a phased cognitive schedul-
+ing strategy to activate different forms of adapta-
+tion in a resource-aware manner. Experiments on
+standard distributed black-box benchmarks and
+real-world distributed tasks show that LAC-MAS
+consistently improves solution quality, conver-
+gence efficiency, and communication efficiency
+over strong baselines, suggesting a practical route
+from handcrafted distributed coordination toward
+self-designing multi-agent optimization systems.
+1. Introduction
+The next generation of intelligent systems will increasingly
+operate in distributed and networked environments, where
+1School of Computer Science and Engineering, South China
+University of Technology, Guangzhou, China. Correspondence to:
+Wei-Neng Chen<cschenwn@scut.edu.cn>.
+multiple agents must make coordinated decisions under
+local observability, limited communication, and heteroge-
+neous feedback.(Chen et al., 2025b; Olfati-Saber et al.,
+2007) Such settings arise in networked sensing, wireless
+communication, autonomous coordination, and other large-
+scale multi-agent systems,(Yulu et al., 2024) where no single
+agent has access to the full system state or global objective.
+From the perspective of optimization, these scenarios are
+closely related to the classical formulation of decentralized
+optimization under communication constraints.(Nedic &
+Ozdaglar, 2009) Distributed black-box consensus optimiza-
+tion provides a representative formulation of this challenge:
+agents can only query local objective values, yet are ex-
+pected to collectively approach a globally desirable solution
+while driving the system toward consensus.
+Despite substantial progress in distributed optimization, ex-
+isting approaches remain limited in their ability to support
+such adaptive decentralized intelligence. Classical gradient-
+based methods offer strong theoretical guarantees, with rep-
+resentative examples including EXTRA (Shi et al., 2015)
+and consensus-based ADMM (Boyd et al., 2011), but they
+rely on explicit objective structure and are often unsuitable
+for black-box and highly non-convex settings. Reinforce-
+ment learning based approaches provide flexibility in han-
+dling complex dynamics and partial observability (Zhang
+et al., 2021; Li et al., 2023; Yu et al., 2022; Li et al., 2024;
+McClellan et al., 2024; He et al., 2022), yet often suffer from
+unstable training, weak scalability, and difficult credit as-
+signment in multi-agent environments. Heuristic and swarm-
+based methods provide a practical alternative for distributed
+black-box optimization (Chen et al., 2025a;c;d), but most
+still depend on handcrafted update rules, fixed interaction
+patterns, and manually designed hyperparameters. As a re-
+sult, they often struggle to balance local adaptation, global
+coordination, robustness, and communication efficiency
+across heterogeneous tasks. More fundamentally, current
+distributed black-box optimizers remain largely rule-driven,
+leaving open the broader question of whether multi-agent
+optimization systems can acquire a degree of self-design
+capability from historical optimization experience.
+In parallel, recent advances in large language models and
+automated algorithm design have opened a new possibility
+1
+arXiv:2605.00691v1  [cs.MA]  1 May 2026
+
+===== PAGE 2 =====
+Learning to Act and Cooperate for Distributed Black-Box Consensus Optimization
+for optimization: instead of relying solely on manually spec-
+ified rules, optimization systems may adapt their strategies
+from historical performance signals, optimization trajecto-
+ries, and algorithmic feedback (Yang et al., 2024; Wan et al.,
+2024; Liu et al., 2024; Ma et al., 2026). These develop-
+ments suggest that learning-based mechanisms can serve
+not only as task solvers, but also as high-level generators
+of algorithmic behaviors. However, most existing LLM-
+assisted or learning-driven auto-design methods have been
+developed for centralized or single-agent settings. Whether
+such trajectory-driven self-design can be brought into dis-
+tributed black-box consensus optimization, where agents are
+limited to local information and neighbor communication,
+remains largely unexplored. This challenge is especially
+fundamental in multi-agent systems, because what must be
+adapted is not only how each agent searches locally, but also
+how agents coordinate with one another under decentralized
+constraints.
+Motivated by this gap, we proposeLearning to Act and
+Cooperate (LAC-MAS), a trajectory-driven collaborative
+framework for distributed black-box consensus optimiza-
+tion. Our key idea is to endow each agent with two coupled
+layers of adaptation. At the execution level, we redesign
+the agent-level swarm dynamics with an adaptive internal
+mechanism tailored to decentralized consensus settings, im-
+proving the balance between exploration, convergence, and
+local escape. On top of this adaptive execution layer, each
+agent is further equipped with an LLM that serves as a
+sparse high-level guidance module rather than an end-to-
+end optimizer. Based only on local and neighbor historical
+trajectories, the LLM helps agents adapt both their internal
+action behaviors and their external cooperation patterns. To
+make such cognitive intervention stable and resource-aware,
+we further introduce a phased cognitive guidance strategy
+that selectively activates different forms of adaptation over
+the course of optimization. In this way, LAC-MAS provides
+an initial step from handcrafted distributed coordination to-
+ward trajectory-driven self-design in multi-agent black-box
+optimization.
+We summarize our main contributions as follows:
+• We redesign the agent-level swarm optimization dy-
+namics for distributed black-box consensus optimiza-
+tion, introducing an adaptive internal mechanism that
+better balances exploration, convergence, and local
+escape under decentralized consensus constraints.
+• On top of this adaptive substrate, we proposeLearn-
+ing to Act and Cooperate (LAC-MAS), a trajectory-
+driven self-design framework in which LLMs provide
+sparse high-level guidance to jointly shape how agents
+act locally and cooperate globally from historical opti-
+mization trajectories.
+• We develop a phased cognitive guidance strategy that
+enables stage-aware coordination of trajectory-driven
+action and cooperation guidance, making high-level
+adaptive guidance practical for decentralized black-box
+optimization.
+2. Related Work
+Distributed Black-Box Consensus Optimization.Dis-
+tributed black-box optimization studies how multiple agents
+cooperatively optimize a global objective using only local
+function evaluations and neighbor communication. Rep-
+resentative approaches include decentralized zeroth-order
+optimization (Mhanna & Assaad, 2023) and unified per-
+spectives connecting zeroth-order and first-order decen-
+tralized optimization under nonconvex and stochastic set-
+tings (Sahinoglu & Shahrampour, 2024). Related works
+have further examined asynchronous decentralized optimiza-
+tion (Nabli & Oyallon, 2023), time-varying network effects
+on consensus behavior (Metelev et al., 2023; Nedi ´c et al.,
+2018), and fundamental complexity trade-offs in decentral-
+ized training (Lu & De Sa, 2021). These studies provide
+important foundations for distributed optimization under
+communication constraints, but they largely focus on fixed
+update rules or predefined optimization mechanisms, rather
+than learning how agents should adapt their local behaviors
+and cooperative interactions from historical optimization
+trajectories.
+Learning-Driven Optimization Design.Recent work
+has increasingly explored learning-based mechanisms for
+algorithm design, suggesting that optimization strategies
+can be adapted from feedback, historical trajectories, and
+higher-level performance signals. Large language models
+have been used as optimization engines for iterative refine-
+ment (Yang et al., 2024), for prompt and instruction opti-
+mization (Pryzant et al., 2023), for trajectory-aware online
+strategy adaptation (Wan et al., 2024), and for enhancing
+Bayesian optimization through LLM-guided reasoning (Liu
+et al., 2024), and for serving as meta-surrogates in offline
+data-driven many-task optimization (Zhang et al., 2025).
+Related efforts also investigate generating optimization al-
+gorithms or solver code directly from natural language speci-
+fications (Ma et al., 2026). More broadly, recent LLM-based
+multi-agent systems demonstrate that LLMs can coordinate
+structured agent behaviors through role assignment, interac-
+tion design, and adaptive collaboration (Zhuge et al., 2024;
+Wu et al., 2024; Ye et al., 2025). However, most existing
+learning-driven or LLM-assisted methods are developed
+for centralized or single-agent settings, or focus on general
+collaborative reasoning rather than distributed black-box
+consensus optimization with only local and neighbor infor-
+mation.
+Adaptive Coordination in Decentralized Systems.A
+2
+
+===== PAGE 3 =====
+Learning to Act and Cooperate for Distributed Black-Box Consensus Optimization
+smaller line of work studies how coordination structures
+in decentralized optimization can be made adaptive, includ-
+ing learning communication graphs under data heterogene-
+ity (Le Bars et al., 2023), analyzing the role of network het-
+erogeneity in decentralized convergence (Koloskova* et al.,
+2020), and designing structure-aware or communication-
+efficient mixing strategies (Lian et al., 2017). These stud-
+ies highlight the importance of coordination design in dis-
+tributed optimization. Recent advances also demonstrate
+the scalability of Large Language Model-based multi-agent
+collaboration in complex tasks (Qian et al., 2025). How-
+ever, they typically focus on graph adaptation, participation
+patterns, or communication efficiency at the network level.
+In contrast, our work remains in a fixed communication
+topology and studies how historical optimization trajecto-
+ries can guide both agent-internal action adaptation and
+agent-external cooperation adaptation within the given de-
+centralized interaction structure.
+3. Problem Formulation
+We consider a distributed black-box consensus optimiza-
+tion problem over a connected communication graph G=
+(V,E) , where V={1, . . . , N} denotes the set of agents and
+E denotes the set of communication links. Each agent i∈ V
+can communicate only with its neighbors in the fixed graph,
+denoted by Ni ={k|(i, k)∈ E} . This setting reflects the
+common case in distributed black-box multi-agent optimiza-
+tion, where communication links are typically determined
+by the underlying system architecture, physical connectiv-
+ity, or communication range, and therefore remain fixed or
+change only passively in special situations. In this work,
+we focus on the fixed connected topology setting, while
+allowing the proposed cooperation mechanism to adapt only
+the weights assigned to existing neighbors.
+Each agent i is associated with a local black-box objective
+function fi :R D →R , which can only be queried by
+function evaluation. The agents jointly aim to optimize the
+global objective defined by the average of local objectives,
+f(x) = 1
+N
+NX
+i=1
+fi(x),(1)
+while satisfying a consensus requirement across agents.
+Since the local objectives are black-box, gradient informa-
+tion is unavailable, and optimization must rely entirely on
+function evaluations and decentralized interaction.
+Accordingly, the goal is to find agent states {xi}N
+i=1 such
+that the system simultaneously achieves: (i)objective im-
+provement, namely reducing the global objective valuef(x);
+and (ii)consensus, namely driving all local agent states to-
+ward agreement. The corresponding distributed consensus
+optimization problem can be written as
+min
+{xi}N
+i=1
+1
+N
+NX
+i=1
+fi(xi)s.t.x i =x j,∀i, j.(2)
+Equivalently, the optimization process seeks a consensus
+solution at which all agents agree on a common decision
+variable while minimizing the average local objective.
+Under this setting, each agent maintains only local optimiza-
+tion information together with messages received from its
+neighbors. In particular, agent i can access its own historical
+query results, local particle states, and aggregated trajectory
+statistics from neighboring agents, but cannot access other
+agents’ objective functions, gradients, or any global opti-
+mization state. During optimization, the global objective
+value is not directly available to any agent and is used only
+for offline evaluation in experiments. This information pat-
+tern defines the decentralized black-box consensus setting
+studied in this paper.
+4. Methodology
+4.1. Framework Overview
+As illustrated in Fig. 1, LAC-MAS adopts a fully decentral-
+ized framework in which each agent consists of two tightly
+coupled layers: an adaptive swarm-based execution layer
+and a trajectory-driven guidance layer. The execution layer
+carries out local black-box optimization under decentral-
+ized consensus constraints, while the guidance layer peri-
+odically updates how the agent should act internally and
+how it should cooperate externally based on accumulated
+optimization trajectories.
+At the execution level, each agent maintains a local popula-
+tion of particles as its black-box optimizer. This population-
+based design allows the agent to explore the search space
+without gradient information and to encode its current opti-
+mization status through collective particle dynamics. Dif-
+ferent from directly applying a conventional particle swarm
+optimizer in a distributed consensus setting, we redesign the
+agent-level swarm dynamics with an adaptive internal mech-
+anism that better matches the needs of decentralized black-
+box optimization, particularly in balancing exploration, con-
+vergence, and local escape.
+On top of this adaptive execution layer, each agent is
+equipped with an agent-specific large language model that
+serves as a high-level guidance module rather than an end-to-
+end optimizer. The LLM does not directly update decision
+variables. Instead, it operates on structured historical trajec-
+tory information, including local population evolution and
+neighbor-provided trajectory summaries, to produce two
+forms of guidance:learning to act, which refines the agent’s
+internal search behavior, andlearning to cooperate, which
+3
+
+===== PAGE 4 =====
+Learning to Act and Cooperate for Distributed Black-Box Consensus Optimization
+Agent i
+Agent i-1
+High-dispersion
+? ?,1
+Intermediate-dispersion
+? 0
+Low-dispersion
+? ?,2
+Agent i+1
+Internal Information
+(Specific Trajectory)
+Internal Act Guidance
+(Variation for Velocity Update)
+Learning to
+Act
+Learning to
+Coop
+Communication
+Average External Trajectory
+Communication
+Average External Trajectory
+Inferior Neighbor
+Low Weight ? ?,?−?
+Superior Neighbor
+High Weight  ? ?,?+?
+Local Objective i
+I II III IV
+ consensus
+Consensus Disagreement < ?
+Global Objective
+LLM
+Learning to Act phases Learning to Coop phases
+LLM update events LLM update events
+Figure 1.LAC-MAS Framework
+adjusts how the agent weights information from different
+neighbors during consensus formation.
+To coordinate these two forms of guidance, LAC-MAS fur-
+ther introduces a phased cognitive guidance mechanism.
+Rather than intervening at every iteration, this mechanism
+organizes when trajectory-driven guidance should be re-
+freshed over the course of optimization, so that internal
+action adaptation and external cooperation adaptation can
+be aligned with the evolving optimization regime in a stable
+and resource-aware manner. Overall, LAC-MAS forms a
+trajectory-driven collaborative framework in which decen-
+tralized black-box optimization is supported by adaptive
+execution, high-level guidance, and stage-aware coordina-
+tion.
+4.2. Adaptive Swarm Execution Layer for Learning to
+Act
+A central challenge in distributed black-box consensus opti-
+mization is that each agent must regulate its local search be-
+havior using only black-box feedback and limited neighbor
+communication. In this setting, the search direction favored
+by an agent’s local objective is not necessarily aligned with
+the globally desirable consensus solution, since the final
+consensus point is determined by the collective objective
+rather than any single local optimum. As a result, directly
+applying conventional particle swarm dynamics is often
+insufficient: fixed internal update patterns cannot flexibly
+balance exploration, convergence, and escape from poor
+local attractors under decentralized constraints. To address
+this issue, we endow each agent with an adaptive swarm
+execution layer that characterizes its current search regime
+through the dispersion of its local particle population.
+Adaptive internal action mechanism.Specifically, for
+agent i, let {x(t)
+i,p}P
+p=1 denote its local particle population at
+iteration t, where P is the population size and x(t)
+i,p ∈R D
+is the position of particle p in the D-dimensional decision
+space. We define the particle centroid of agentias
+µ(t)
+i = 1
+P
+PX
+p=1
+x(t)
+i,p,(3)
+and the corresponding particle divergence as
+D(t)
+i = 1
+P
+PX
+p=1
+∥x(t)
+i,p −µ (t)
+i ∥2
+2,(4)
+where D(t)
+i measures the dispersion of the local particle
+population around its centroid. A larger divergence indicates
+that the particle population is more widely spread and the
+agent remains in a more exploratory search regime, whereas
+a smaller divergence reflects stronger concentration and a
+tendency toward local convergence.
+Based on this population-state signal, we introduce for each
+agent a small set of internal behavioral coefficients,
+wi = (wi,1, w 0, w i,2),(5)
+4
+
+===== PAGE 5 =====
+Learning to Act and Cooperate for Distributed Black-Box Consensus Optimization
+where wi,1, w0, and wi,2 correspond to different internal
+search regimes. During execution, agent i selects an active
+coefficientw (t)
+i according to the current divergence level:
+w(t)
+i =
+
+
+
+wi,2, D (t)
+i < d 1,
+w0, d 1 ≤D (t)
+i ≤d 2,
+wi,1, D (t)
+i > d 2,
+(6)
+where d1 and d2 are divergence thresholds satisfying d1 <
+d2. The selected coefficient w(t)
+i ∈R is then used to regu-
+late the internal swarm dynamics. Let v(t)
+i,p ∈R D denote the
+velocity of particle p at iteration t, and let∆(t)
+i,p ∈R D denote
+the random modulation vector generated by the underlying
+swarm update rule. Using element-wise multiplication ⊙,
+the particle velocity is updated as
+v(t+1)
+i,p =w (t)
+i
+ 
+∆(t)
+i,p ⊙v (t)
+i,p
+
+,(7)
+followed by the position update
+x(t+1)
+i,p =x (t)
+i,p +v (t+1)
+i,p .(8)
+This multiplicative form preserves the stochastic modulation
+mechanism of the underlying swarm dynamics, while intro-
+ducing the adaptive coefficient w(t)
+i to regulate the strength
+of internal variation across different search regimes. Conse-
+quently, the execution layer itself becomes adaptive to the
+evolving local optimization state, providing an internal opti-
+mization substrate better suited to decentralized black-box
+consensus optimization.
+This adaptive mechanism already improves the compatibil-
+ity of swarm execution with distributed black-box consensus
+optimization, because it allows the internal search behavior
+of each agent to vary with its current population state rather
+than remain fixed throughout optimization. However, if
+the coefficient set wi is manually specified once and kept
+unchanged, the resulting adaptation is still rule-based and
+cannot fully exploit richer trajectory-level evidence accumu-
+lated over time.
+Trajectory-driven refinement by LLM guidance.Built on
+top of the above adaptive execution layer, the LLM further
+refines internal action behavior using historical optimization
+trajectories. Rather than directly controlling particle updates,
+the LLM infers the internal coefficient set wi from recent
+trajectory information, so that the resulting search regimes
+are not fixeda prioribut refreshed according to the agent’s
+evolving optimization history. The divergence-based rule
+in Eq. (4) then instantiates these learned coefficients online,
+enabling the agent to translate trajectory-level guidance into
+population-state-dependent execution. Therefore, learning
+to act in LAC-MAS combines a population-state-driven
+adaptive execution mechanism with higher-level trajectory-
+driven refinement, enabling more flexible internal behavior
+adaptation than handcrafted static swarm rules.
+4.3. Trajectory-Driven Cooperation Guidance
+Learning agent-external cooperative behaviors.Beyond
+regulating how each agent acts internally, LAC-MAS also
+learns how agents should cooperate during consensus for-
+mation. In distributed black-box consensus optimization,
+information received from different neighbors may have
+highly unequal utility: some neighbors may provide more
+informative optimization trajectories, while others may be
+less helpful due to slow progress, premature concentration,
+or locally biased search behavior. Therefore, relying on
+fixed or uniform neighbor weighting can limit the flexibility
+and efficiency of decentralized coordination.
+To address this issue, agent i evaluates each neighbor k∈
+Ni through a trajectory-based descriptor
+s(t)
+ik =
+
+f
+(t)
+k , D
+(t)
+k , ∥∆xk∥
+(t)
+,(9)
+where f
+(t)
+k denotes the recent average objective value of
+neighbor k over a short trajectory window, D
+(t)
+k denotes its
+recent average particle divergence, and ∥∆xk∥
+(t)
+denotes
+the recent average magnitude of its state variation. Together,
+these quantities summarize the neighbor’s solution quality,
+population dispersion, and recent search activity.
+Based on the descriptor set {s(t)
+ik }k∈Ni, the LLM outputs
+candidate cooperation weights over Ni ∪ {i}. To guard
+against occasional infeasible outputs, we apply an explicit
+normalization/projection step before execution, ensuring
+that the final weights {a(t)
+ik } are nonnegative and sum to one.
+The resulting weights are then used in the agent-external
+cooperative update
+x(t+1)
+i =
+X
+k∈Ni∪{i}
+a(t)
+ik x(t+1)
+k .(10)
+In this way, cooperation in LAC-MAS is no longer gov-
+erned by fixed neighbor averaging, but by trajectory-driven
+learning of the relative value of neighbor information within
+the given communication graph. Importantly, the topology
+itself remains unchanged: the learned cooperation mecha-
+nism only adjusts the influence of existing neighbors based
+on their historical optimization utility, thereby preserving
+decentralized communication constraints while improving
+coordination flexibility.
+4.4. Phased Cognitive Guidance
+While Secs. 4.2–4.3 specify how LAC-MAS learns agent-
+internal action guidance and agent-external cooperation
+guidance from historical trajectories, an additional question
+remains:whenshould such guidance be refreshed during op-
+timization? In distributed black-box consensus optimization,
+these two forms of guidance have different functional roles
+5
+
+===== PAGE 6 =====
+Learning to Act and Cooperate for Distributed Black-Box Consensus Optimization
+Algorithm 1Trajectory-Driven Internal Action and Cooper-
+ation Update (Agenti)
+Input:particle states {x(t)
+i,p, v(t)
+i,p}P
+p=1, neighbor set Ni,
+local historyH (t)
+i , neighbor histories{H (t)
+k }k∈Ni
+Compute centroidµ (t)
+i and divergenceD (t)
+i
+Aggregate local trajectory features fromH (t)
+i
+Construct neighbor descriptors{s (t)
+ik }k∈Ni
+ifguidance refresh is triggeredthen
+Build an agent-specific prompt using local trajectory
+features and neighbor descriptors
+Query the LLM to obtain:
+internal coefficient setw i = (wi,1, w0, wi,2)
+candidate cooperation weights overN i ∪ {i}
+Project outputs to feasible ranges
+end if
+Select active internal coefficientw (t)
+i based onD (t)
+i
+Update particle velocities and positions using adaptive
+internal action
+Normalize/project candidate cooperation weights to ob-
+tain{a (t)
+ik }
+Perform weighted consensus update
+Update local historyH (t+1)
+i
+and therefore different refresh requirements. Internal ac-
+tion guidance mainly matters when the local search regime
+changes substantially, whereas cooperation guidance needs
+to be revisited more regularly as the relative utility of neigh-
+bors evolves during consensus formation. Moreover, from
+an execution perspective, the low-level swarm optimizer
+evolves continuously and can run in parallel across agents,
+whereas high-level LLM guidance is refreshed only inter-
+mittently and may be obtained asynchronously. Applying a
+uniform guidance-refresh pattern throughout optimization
+is therefore both inefficient and potentially unstable.
+To address this issue, we introducePhased Cognitive Guid-
+ance(PCG), a high-level scheduling mechanism that deter-
+mines when trajectory-driven guidance should be refreshed
+during optimization. PCG does not alter the underlying
+learning mechanisms themselves. Instead, it coordinates
+the refresh of internal action guidance and external coopera-
+tion guidance according to their distinct functional roles,
+while decoupling continuous decentralized optimization
+from sparse high-level guidance updates without requiring
+strict iteration-level synchronization.
+Pre-experiment calibration.PCG uses a lightweight pre-
+experiment to estimate a characteristic optimization horizon
+T , which serves as a coarse temporal reference for schedul-
+ing guidance refresh. The purpose of T is not to predict
+the exact convergence time, but to provide a stable scale for
+organizing stage-aware updates. When preliminary calibra-
+tion is unavailable, a coarse estimate of T is still sufficient
+for applying the framework.
+Guidance-refresh gating.Based on the calibrated hori-
+zon T , PCG defines two binary gating functions indicating
+whether cooperation guidance or internal action guidance
+is refreshed at iteration t, respectively. The cooperation-
+refresh gate is defined as
+gext(t) =I{t∈ T ext},(11)
+where
+Text ={⌈mρ extT⌉} m≥1,(12)
+and ρext >0 controls the refresh interval of cooperation
+guidance.
+The internal-action refresh gate is defined as
+gint(t) =I{t∈ T int},(13)
+where
+Tint ={⌈ρ 1T⌉,⌈ρ 2T⌉},0< ρ 1 < ρ 2 <1.(14)
+Here, ρ1 and ρ2 specify two key refresh points for inter-
+nal action guidance. This asymmetric design reflects the
+distinct roles of the two adaptation types: cooperation guid-
+ance needs to be revisited repeatedly as neighbor utilities
+evolve, whereas internal action guidance mainly needs to
+be refreshed when the local search regime changes sub-
+stantially. After the optimization progresses beyond the
+calibrated horizon, internal-action refresh is deactivated:
+gint(t) = 0,∀t≥T.(15)
+The interaction between the two gates induces an implicit
+stage structure over the optimization process. Let s(t) de-
+note the stage index at iteration t, defined by transition
+pointsτ m =⌈α mT⌉with0< α 1 < α 2 < α 3 ≤1:
+s(t) =
+
+
+
+1,0≤t < τ 1,
+2, τ 1 ≤t < τ 2,
+3, τ 2 ≤t < τ 3,
+4, τ 3 ≤t.
+(16)
+This stage structure summarizes how the emphasis of guid-
+ance refresh shifts over time, including initial trajectory ac-
+cumulation, adaptive internal search regulation, joint action–
+cooperation refinement, and late-stage consensus stabiliza-
+tion. The corresponding qualitative descriptions are pro-
+vided in Appendix A.
+Accordingly, PCG should be viewed primarily as a guidance-
+refresh scheduling mechanism, while the stage structure
+serves as a coarse interpretation of how refresh emphasis
+evolves across optimization. By coordinating the refresh
+of internal action guidance and external cooperation guid-
+ance in this manner, PCG enables stable and resource-aware
+learning to act and learning to cooperate throughout dis-
+tributed black-box optimization.
+6
+
+===== PAGE 7 =====
+Learning to Act and Cooperate for Distributed Black-Box Consensus Optimization
+4.5. Consensus Guarantees
+We analyze the consensus properties of LAC-MAS and
+show that the proposed internal action adaptation, trajectory-
+driven cooperation guidance, and phased cognitive refresh
+preserve the consensus structure of the underlying decen-
+tralized swarm optimizer under standard assumptions. Our
+goal here is not to model the full stochastic token-generation
+process of the LLM, but to establish that the closed-loop
+optimization dynamics remain admissible for consensus.
+Assumptions.We adopt the following assumptions, which
+are standard in consensus-based distributed optimization
+and consistent with the deterministic consensus backbone
+established for MASOIE (Chen et al., 2025c).
+(A1) The communication graph G= (V,E) is fixed and
+connected.
+(A2) After normalization/projection, the cooperation
+weights {a(t)
+ik } are nonnegative, graph-compatible, and
+row-stochastic for allt, i.e.,
+a(t)
+ik ≥0,
+a(t)
+ik = 0ifk /∈ N i ∪ {i},
+X
+k∈Ni∪{i}
+a(t)
+ik = 1.
+(17)
+(A3) The internal coefficients selected from wi =
+(wi,1, w0, wi,2) and the modulation vectors ∆(t)
+i,p are
+bounded.
+(A4) Under fixed internal coefficients and admissible con-
+sensus weights, the underlying decentralized swarm
+executor admits consensus, consistent with the deter-
+ministic MASOIE backbone (Chen et al., 2025c).
+(A5) In the late-stage stable regime induced by PCG, the
+effective perturbation term entering the agent-level
+consensus fusion is asymptotically vanishing, i.e.,
+∥ξ(t)∥ →0ast→ ∞.
+Admissibility of trajectory-driven cooperation.The coop-
+eration mechanism in Sec. 4.3 does not modify the commu-
+nication topology itself; it only reweights existing neighbor
+information. Because the final cooperation weights are ex-
+plicitly normalized/projected before execution, the induced
+matrix
+A(t) = [a(t)
+ik ](18)
+remains nonnegative, row-stochastic, and graph-compatible
+for all t. Hence, the LLM-guided cooperation module pre-
+serves the standard consensus mixing conditions over the
+original connected graph.
+Boundedness of internal action adaptation.The internal
+action mechanism in Sec. 4.2 modulates the swarm dynam-
+ics through bounded coefficients selected from the finite
+set wi. Since both w(t)
+i and ∆(t)
+i,p are bounded, the internal
+update remains a bounded modulation of the underlying
+swarm executor. Moreover, by PCG, internal-guidance re-
+fresh occurs only at finitely many scheduled stages and is
+deactivated after the calibrated horizon T . Therefore, the in-
+ternal action mechanism introduces only piecewise-constant,
+finite-stage adaptation rather than persistent high-frequency
+switching.
+Closed-loop consensus dynamics.Let x(t)
+i denote the
+agent-level representative state of agent i used in consensus
+fusion at iteration t, as induced by its local particle popu-
+lation. Stacking these representative states across agents
+gives
+x(t) = [x(t)
+1 , . . . , x(t)
+N ]⊤.(19)
+The cooperative update of LAC-MAS can be written as
+x(t+1) =A (t)x(t) +ξ (t),(20)
+where A(t) is the row-stochastic mixing matrix induced by
+the cooperation weights and ξ(t) collects the perturbations
+introduced by local black-box swarm search and internal
+adaptive execution. By Assumptions (A2)–(A3), A(t) re-
+mains admissible and ξ(t) remains bounded; by Assumption
+(A5), the perturbation vanishes asymptotically.
+Under PCG, the resulting system is a switched consensus
+process with admissible time-varying mixing matrices and
+finitely many internal-guidance regime changes. After the
+final internal refresh, the system evolves under stable decen-
+tralized dynamics with vanishing perturbations.
+Theorem 4.1.Under Assumptions (A1)–(A5), the proposed
+LAC-MAS framework preserves consensus, i.e.,
+lim
+t→∞
+∥x(t)
+i −x (t)
+j ∥= 0,∀i, j.(21)
+Proof sketch.For fixed internal coefficients and fixed ad-
+missible consensus weights, the claim follows from the con-
+sensus backbone of the underlying decentralized swarm op-
+timizer, consistent with the deterministic MASOIE analysis.
+The LLM-guided cooperation mechanism preserves graph
+connectivity and row-stochasticity through explicit normal-
+ization/projection, so it does not alter the admissible con-
+sensus structure. The internal action mechanism introduces
+only bounded coefficient modulation, and PCG restricts
+internal-guidance refresh to finitely many scheduled stages
+before T . Consequently, LAC-MAS can be interpreted as
+a switched consensus system with admissible time-varying
+mixing matrices and asymptotically vanishing perturbations.
+Standard consensus arguments for connected row-stochastic
+switching systems then imply ∥x(t)
+i −x (t)
+j ∥ →0 for all
+7
+
+===== PAGE 8 =====
+Learning to Act and Cooperate for Distributed Black-Box Consensus Optimization
+agents. Detailed verification that LAC-MAS satisfies the
+admissibility, finite-switching, and vanishing-perturbation
+conditions required by this argument is provided in Ap-
+pendix E.□
+This result shows that LAC-MAS extends the decentralized
+consensus backbone with trajectory-driven internal and ex-
+ternal adaptation, while retaining the structural conditions
+required for consensus.
+5. Experimental Setup and Results
+5.1. Experimental Setup
+Benchmark Functions.We evaluate LAC-MAS on a
+standard benchmark suite for consensus-based distributed
+black-box optimization, consisting of ten test functions (F1–
+F10) widely adopted in prior multi-agent optimization stud-
+ies (Chen et al., 2025c). The benchmarks cover diverse char-
+acteristics, including unimodal and multimodal landscapes,
+homogeneous and heterogeneous objective distributions, as
+well as shifted and non-separable functions.
+All benchmark problems are instantiated with 100 deci-
+sion variables and distributed across 20 agents. Each agent
+can only query its own local black-box objective, while
+the global objective—defined as the average of all local
+objectives—is never accessible during optimization. This
+strictly follows the consensus-based distributed optimization
+protocol (Chen et al., 2025c).
+Compared Methods.We compare LAC-MAS with repre-
+sentative state-of-the-art baselines from three categories: (1)
+multi-agent swarm optimization methods, including MA-
+SOIE (Chen et al., 2025c), which serves as the primary base-
+line due to its adaptive internal–external learning design; (2)
+consensus-driven population-based frameworks, including
+GFPDO (Ai et al., 2017), which employ explicit consensus
+mechanisms and typically incur relatively dense communi-
+cation overhead; and (3) classical distributed gradient-free
+and swarm-based methods, including RGF (Yuan & Ho,
+2014) and DA-PSO (Jalloul & Al-Alaoui, 2015), which
+represent representative average-consensus-based black-box
+coordination strategies.
+All baselines adopt the parameter settings reported in their
+original publications to ensure fair comparison. Each algo-
+rithm is independently executed 25 times, consistent with
+prior benchmark protocols (Chen et al., 2025c). Conver-
+gence is declared when the disagreement metric drops below
+10−7.
+Evaluation Metrics.Performance is evaluated using three
+metrics: (i) final fitness, (ii) cumulative communication cost
+until convergence, and (iii) disagreement over iterations.
+Statistical comparisons across benchmark functions are con-
+ducted using the Friedman test followed by the Nemenyi
+post-hoc procedure at significance levelα= 0.05.
+Implementation and Runtime Environment.Unless oth-
+erwise stated, all experiments are conducted in a distributed
+simulation setting on a computing server equipped with
+Intel(R) Xeon(R) CPU E5-2699 v3 @ 2.30GHz and Cen-
+tOS 7.5 x64, following the same hardware setting reported
+for MASOIE-based evaluation (Chen et al., 2025c). The
+low-level swarm executors run continuously for each agent,
+while high-level LLM guidance is invoked sparsely accord-
+ing to PCG rather than at every iteration.
+5.2. Benchmark Results
+Quantitative results on benchmark functions are summa-
+rized in Table 1, while representative convergence curves of
+disagreement are illustrated in Fig. 2.
+Across the benchmark suite, LAC-MAS consistently out-
+performs or matches strong distributed black-box baselines,
+achieving lower mean and median fitness on most func-
+tions while maintaining stable disagreement reduction. The
+gains are particularly pronounced on functions that require
+flexible regulation of exploration and convergence, where
+trajectory-driven internal behavior learning and adaptive
+cooperation can better balance local refinement and global
+coordination.
+On functions dominated by narrow valleys or strongly di-
+rectional landscapes (e.g., F3 and F6), LAC-MAS does
+not exhibit statistically significant differences compared to
+MASOIE, yet consistently matches the strongest baselines.
+This behavior suggests that when the optimization struc-
+ture already favors highly specialized search dynamics, the
+proposed learning mechanisms preserve robustness with-
+out degrading performance, while offering limited room for
+further improvement.
+5.3. Ablation Experiments
+To assess the individual and joint contributions of learning
+to act and learning to cooperate, we conduct an ablation
+study based on MASOIE (Chen et al., 2025c). The study
+progressively enables agent-internal behavior learning and
+agent-external cooperation learning along two orthogonal
+dimensions, directly reflecting the core design philosophy
+of LAC-MAS.
+We consider the following four variants:
+(1) MASOIE (Baseline):A rule-based optimizer with fixed
+velocity-related coefficients and uniform neighbor weights,
+serving as a reference without learning capability.
+(2) LAC-MAS-Coop:Only agent-external cooperation is
+learned via LLM-guided neighbor weight adaptation, while
+agent-internal search dynamics remain fixed.
+8
+
+===== PAGE 9 =====
+Learning to Act and Cooperate for Distributed Black-Box Consensus Optimization
+Table 1.COMPARISON OF LAC-MAS WITH EXISTING ALGORITHMS
+LAC-MAS MASOIE GFPDO RGF DAPSO LAC-MAS MASOIE GFPDO RGF DAPSO
+mean 2.21E+04 6.81E+04 2.44e+06 4.58e+08 1.10e+07 6.43E+06 6.03E+06 2.77e+09 2.98e+09 1.82e+09
+median 2.14E+04 6.61E+04 2.34e+06 4.50e+08 9.52e+06 6.62E+06 5.98E+06 2.84e+09 2.99e+09 1.80e+09
+std 4.65E+03 1.36E+04 6.97e+05 1.96e+07 4.39e+06 1.16E+06 1.96E+06 2.17e+08 2.71e+07 3.18e+08
+p-value
+F1
+- 2.53e-02* 7.74e-06# 2.22e-16# 1.97e-11#
+F6
+- 7.88E-01 1.04e-08# 2.23e-13# 9.35e-04#
+mean 7.57E+04 7.96E+04 1.57e+07 1.45e+08 7.02e+07 1.06E+05 1.47E+05 2.31e+09 2.82e+09 2.05e+09
+median 7.58E+04 7.93E+04 1.46e+07 1.45e+08 6.94e+07 1.03E+05 1.47E+05 2.32e+09 2.82e+09 1.89e+09
+std 5.56E+03 9.61E+03 7.22e+06 0.00e+00 8.22e+06 2.59E+04 4.32E+04 1.75e+08 0.00e+00 4.62e+08
+p-value
+F2
+- 4.21E-01 1.72e-04# 2.22e-16# 2.06e-09#
+F7
+- 1.80E-01 6.11e-09# 2.22e-16# 2.13e-06#
+mean 9.99E+03 1.05E+04 2.60e+09 3.57e+07 4.02e+08 3.03E+07 4.13E+07 4.41e+08 1.52e+09 1.51e+09
+median 9.75E+03 1.04E+04 2.53e+09 3.54e+07 4.06e+08 3.00E+07 4.13E+07 4.42e+08 1.54e+09 1.42e+09
+std 1.53E+03 3.12E+03 2.23e+08 7.68e+05 7.01e+07 3.54E+06 3.21E+06 2.09e+07 2.55e+08 5.19e+08
+p-value
+F3
+- 7.88E-01 1.78e-15# 4.86e-04# 1.04e-08#
+F8
+- 2.53e-02* 7.74e-10# 1.78e-15# 1.44e-14#
+mean 2.36E+01 2.42e+01 1.56e+01 2.80e+01 3.46e+01 1.26E+05 1.28E+05 3.64e+07 4.46e+07 3.31e+08
+median 2.34E+01 2.42E+01 1.56e+01 2.79e+01 3.52e+01 1.29E+05 1.30E+05 3.50e+07 2.71e+07 1.93e+08
+std 7.27E-01 9.93E-01 3.49e-01 1.88e+00 3.15e+00 1.10E+04 9.51E+03 1.20e+07 5.71e+07 3.70e+08
+p-value
+F4
+- 2.45E-01 5.56e-04# 8.30e-05# 6.76e-10#
+F9
+- 4.21E-01 2.93e-08# 5.48e-07# 1.14e-13#
+mean 1.55E+07 2.14E+07 5.39e+08 1.81e+09 6.52e+08 5.06E+06 8.28E+06 2.30e+09 2.46e+09 5.52e+09
+median 1.61E+07 2.16E+07 5.32e+08 1.81e+09 6.73e+08 4.87E+06 8.07E+06 2.30e+09 2.42e+09 5.26e+09
+std 1.87E+06 2.04E+06 3.78e+07 9.19e+06 1.07e+08 1.17E+06 2.00E+06 9.69e+07 5.15e+08 9.95e+08
+p-value
+F5
+- 2.53e-02* 2.13e-06# 2.22e-16# 1.20e-10#
+F10
+- 6.03E-02 2.13e-07# 1.75e-08# 2.22e-16#
+* and # indicate statistical significance based on the Friedman test with Nemenyi post-hoc test atα= 0.05andα= 0.01, respectively.
+(3) LAC-MAS-Act:Only agent-internal behaviors are
+learned through LLM-guided adaptation of velocity-related
+coefficients, while agent-external coordination relies on
+static neighbor weights.
+(4) LAC-MAS (Full):The complete framework that jointly
+learns how agents act and how they cooperate from histor-
+ical optimization trajectories, coordinated through phased
+cognitive guidance. The ablation results reveal clear and
+complementary roles of learning to act and learning to co-
+operate.
+The Act Learning variant consistently improves final fitness
+over the baseline, particularly on multimodal and hetero-
+geneous functions. As reflected in the convergence curves,
+this variant often exhibits rapid objective reduction in early
+and mid stages, occasionally followed by temporary slow-
+downs or mild reversals before further improvement. This
+characteristic behavior indicates that adaptive regulation of
+agent-internal search dynamics accelerates local refinement
+while preserving the ability to escape suboptimal regions. At
+the same time, stronger exploration-induced perturbations
+may delay or slightly destabilize consensus formation.
+In contrast, the Coop Learning variant achieves faster dis-
+agreement reduction and lower communication cost across
+most benchmarks. This observation suggests that learning
+agent-external cooperation primarily enhances information
+utilization efficiency and accelerates consensus formation,
+while offering comparatively limited gains in final objective
+accuracy when internal search dynamics remain fixed.
+The full LAC-MAS framework achieves the most sta-
+ble and consistently strong performance across bench-
+marks. By jointly learning agent-internal behaviors and
+agent-external cooperation and coordinating their activation
+through phased cognitive guidance, LAC-MAS effectively
+balances exploration, convergence, and communication effi-
+ciency.
+Overall, these results demonstrate that learning to act and
+learning to cooperate address distinct yet interdependent
+challenges in distributed black-box optimization, and that
+their coordinated integration is essential for robust and scal-
+able consensus formation. For completeness, detailed fitness
+statistics of all ablation variants across benchmark functions,
+along with the remaining disagreement curves, are reported
+in Appendix B.
+5.4. Transfer Validation on a Distributed WSN
+Localization Task
+To further assess the generality of LAC-MAS beyond syn-
+thetic benchmarks, we evaluate it on a cooperative multi-
+target localization task in wireless sensor networks (WSNs),
+which serves as a representative distributed black-box con-
+sensus problem. This task involves partial information, het-
+erogeneous local observations, and limited communication,
+and therefore provides a meaningful transfer-style validation
+of the proposed trajectory-driven optimization framework.
+Consider n sensors deployed at known locations {yi}n
+i=1
+and Nt targets with unknown 3D positions {pt}Nt
+t=1, where
+pt ∈R 3. The optimization variable is the concatenation
+(p1, . . . , pNt). The global objective is defined as the average
+9
+
+===== PAGE 10 =====
+Learning to Act and Cooperate for Distributed Black-Box Consensus Optimization
+100 101 102 103 104
+evaluation number
+10 15
+10 12
+10 9
+10 6
+10 3
+100
+103
+Disagreement
+F1: Disagreement vs. Evaluations
+LAC-MAS
+LAC-MAS-Act
+LAC-MAS-Coop
+MASOIE
+GFPDO
+RGF
+DAPSO
+(a) F1
+100 101 102 103 104
+evaluation number
+10 15
+10 12
+10 9
+10 6
+10 3
+100
+103
+Disagreement
+F2: Disagreement vs. Evaluations
+LAC-MAS
+LAC-MAS-Act
+LAC-MAS-Coop
+MASOIE
+GFPDO
+RGF
+DAPSO (b) F2
+100 101 102 103 104
+evaluation number
+10 15
+10 12
+10 9
+10 6
+10 3
+100
+103
+Disagreement
+F3: Disagreement vs. Evaluations
+LAC-MAS
+LAC-MAS-Act
+LAC-MAS-Coop
+MASOIE
+GFPDO
+RGF
+DAPSO
+(c) F3
+100 101 102 103 104
+evaluation number
+10 15
+10 12
+10 9
+10 6
+10 3
+100
+103
+Disagreement
+F4: Disagreement vs. Evaluations
+LAC-MAS
+LAC-MAS-Act
+LAC-MAS-Coop
+MASOIE
+GFPDO
+RGF
+DAPSO (d) F4
+Figure 2.Disagreement evolution on representative benchmark functions.
+of local objectives across sensors:
+F(p 1, . . . , pNt) = 1
+n
+nX
+i=1
+fi(p1, . . . , pNt),(22)
+where the local objective of sensor i measures the squared
+mismatch between its received signal measurements and a
+log-distance path-loss model:
+fi(·) =
+NtX
+t=1
+h
+ϕit −
+ 
+P0 −10n p lg ∥pt −y i∥
+d0
+i2
+.(23)
+Here ϕit denotes the received signal strength (RSS) mea-
+surement from target t to sensor i, P0 is the reference RSS at
+distance d0, and np is the path-loss exponent. This formula-
+tion follows the distributed multi-target localization setting
+commonly used in prior MASOIE-style evaluation, in which
+each agent only observes its own local measurement-driven
+objective and cooperation is required to reduce the system-
+level estimation error (Chen et al., 2025c).
+We use the estimation error as the primary metric, defined
+exactly as the global objective value in Eq. (22). For evalua-
+tion, at each communication round k we compute a system-
+level estimate
+¯x(k) = 1
+n
+nX
+i=1
+x(k)
+i ,(24)
+and report
+Err(k) ≜F
+
+¯x(k)
+
+,(25)
+where ¯x(k) is decoded into (¯p(k)
+1 , . . . ,¯p(k)
+Nt ). This produces a
+single scalar curve that directly reflects localization accuracy.
+As shown in Fig. 3, LAC-MAS consistently achieves the
+lowest estimation error across all tested target numbers.
+Although the estimation error of all methods increases as
+Nt grows, LAC-MAS maintains a substantially lower error
+level throughout, while the baseline methods converge to no-
+ticeably higher error plateaus. These results suggest that the
+10
+
+===== PAGE 11 =====
+Learning to Act and Cooperate for Distributed Black-Box Consensus Optimization
+/uni00000014/uni00000013/uni00000015/uni00000013/uni00000016/uni00000013/uni00000017/uni00000013/uni00000018/uni00000013
+/uni00000051/uni00000058/uni00000050/uni00000045/uni00000048/uni00000055/uni00000003/uni00000052/uni00000049/uni00000003/uni00000057/uni00000044/uni00000055/uni0000004a/uni00000048/uni00000057/uni00000056
+/uni00000014/uni00000013/uni00000014
+/uni00000014/uni00000013/uni00000013
+/uni00000014/uni00000013/uni00000014
+/uni00000014/uni00000013/uni00000015
+/uni00000014/uni00000013/uni00000016
+/uni00000048/uni00000056/uni00000057/uni0000004c/uni00000050/uni00000044/uni00000057/uni0000004c/uni00000052/uni00000051/uni00000003/uni00000048/uni00000055/uni00000055/uni00000052/uni00000055
+/uni00000013/uni00000011/uni00000013/uni0000001a
+/uni00000013/uni00000011/uni00000015/uni00000017
+/uni00000016/uni00000011/uni00000019/uni00000014
+/uni00000014/uni0000001a/uni00000011/uni0000001c/uni00000015
+/uni00000019/uni00000013/uni00000011/uni00000017/uni0000001c
+/uni0000002f/uni00000024/uni00000026/uni00000010/uni00000030/uni00000024/uni00000036
+/uni00000030/uni00000024/uni00000036/uni00000032/uni0000002c/uni00000028
+/uni0000002a/uni00000029/uni00000033/uni00000027/uni00000032
+/uni00000035/uni0000002a/uni00000029
+/uni00000027/uni00000024/uni00000010/uni00000033/uni00000036/uni00000032
+Figure 3. Performance of LAC-MAS and compared algorithms on
+the multi-target localization with different number of targets.
+proposed learning-to-act and learning-to-cooperate mecha-
+nism transfers beyond synthetic functions and remains ef-
+fective in a realistic distributed black-box task under limited
+communication.
+These results suggest that the proposed framework gener-
+alizes beyond synthetic functions and remains effective on
+structured distributed black-box tasks under limited commu-
+nication. In this sense, the WSN task provides a represen-
+tative transfer validation of the proposed trajectory-driven
+optimization framework in a realistic distributed setting.
+6. Conclusion
+This paper studied consensus-based black-box optimization
+from a learning perspective and proposed LAC-MAS, an
+LLM-assisted multi-agent framework that jointly learns how
+agents act and how they cooperate. By introducing adaptive
+regulation of agent-internal behaviors and agent-external
+coordination, and orchestrating their interaction through
+phased cognitive guidance, LAC-MAS effectively balances
+exploration, convergence, and communication efficiency.
+Extensive benchmark experiments and ablation studies
+demonstrate that learning to act and learning to cooperate
+play complementary roles in distributed optimization. Inter-
+nal behavioral learning improves solution quality and escape
+capability, while cooperative learning accelerates consensus
+formation and reduces communication cost. Their coor-
+dinated integration leads to stable and consistently strong
+performance across diverse problem landscapes.
+Impact Statement
+This work focuses on improving the efficiency and robust-
+ness of distributed black-box optimization in multi-agent
+systems. Potential applications include cooperative sens-
+ing, resource allocation, and distributed control, which may
+contribute to more efficient and resilient large-scale sys-
+tems. The proposed framework does not involve human
+subjects or personal data and is not expected to introduce
+significant ethical or societal risks beyond those common to
+general-purpose optimization technologies.
+References
+Ai, W., Chen, W., and Xie, J. A general framework for
+population-based distributed optimization over networks.
+Information Sciences, 418:136–152, 2017.
+Boyd, S., Parikh, N., Chu, E., Peleato, B., Eckstein, J., et al.
+Distributed optimization and statistical learning via the
+alternating direction method of multipliers.Foundations
+and Trends® in Machine learning, 3(1):1–122, 2011.
+Chen, T.-Y ., Chen, W.-N., Hao, J.-K., Wang, Y ., and Zhang,
+J. Multi-agent evolution strategy with cooperative and
+cumulative step adaptation for black-box distributed opti-
+mization.IEEE Transactions on Evolutionary Computa-
+tion, 2025a. doi: 10.1109/TEVC.2025.3525713.
+Chen, T.-Y ., Chen, W.-N., Wei, F.-F., Guo, X.-Q., Song,
+W.-X., Zhu, R., Lin, Q., and Zhang, J. The confluence
+of evolutionary computation and multi-agent systems: A
+survey.IEEE/CAA Journal of Automatica Sinica, 12(11):
+2175–2193, 2025b. doi: 10.1109/JAS.2025.125246.
+Chen, T.-Y ., Chen, W.-N., Wei, F.-F., Hu, X.-M., and
+Zhang, J. Multi-agent swarm optimization with adap-
+tive internal and external learning for complex consensus-
+based distributed optimization.IEEE Transactions on
+Evolutionary Computation, 29(4):906–920, 2025c. doi:
+10.1109/TEVC.2024.3380436.
+Chen, T.-Y ., Hu, X.-M., Lin, Q., and Chen, W.-N. Multi-
+agent swarm optimization with contribution-based coop-
+eration for distributed multi-target localization and data
+association.IEEE/CAA Journal of Automatica Sinica,
+2025d. doi: 10.1109/JAS.2025.125150.
+He, K., Doshi, P., and Banerjee, B. Reinforcement learning
+in many-agent settings under partial observability. InPro-
+ceedings of the Thirty-Eighth Conference on Uncertainty
+in Artificial Intelligence, volume 180 ofProceedings of
+Machine Learning Research, pp. 780–789. PMLR, 2022.
+Jalloul, M. K. and Al-Alaoui, M. A. A distributed particle
+swarm optimization algorithm for block motion estima-
+tion using the strategies of diffusion adaptation. In2015
+International Symposium on Signals, Circuits and Sys-
+tems (ISSCS), pp. 1–4. IEEE, 2015.
+Koloskova*, A., Lin*, T., Stich, S. U., and Jaggi, M. De-
+centralized deep learning with arbitrary communication
+compression. InInternational Conference on Learning
+Representations, 2020.
+11
+
+===== PAGE 12 =====
+Learning to Act and Cooperate for Distributed Black-Box Consensus Optimization
+Le Bars, B., Bellet, A., Tommasi, M., Lavoie, E., and Ker-
+marrec, A.-M. Refined convergence and topology learn-
+ing for decentralized sgd with heterogeneous data. In
+Proceedings of The 26th International Conference on
+Artificial Intelligence and Statistics, volume 206 ofPro-
+ceedings of Machine Learning Research, pp. 1672–1702.
+PMLR, 25–27 Apr 2023.
+Li, P. et al. Race: Improve multi-agent reinforcement learn-
+ing with representation asymmetry and collaborative em-
+bedding. InProceedings of the 40th International Confer-
+ence on Machine Learning, volume 202 ofProceedings
+of Machine Learning Research. PMLR, 2023.
+Li, X., Du, S. S., and Wang, M. Incentivize without bonus:
+Efficient multi-agent reinforcement learning with struc-
+tured uncertainty. InProceedings of the 41st International
+Conference on Machine Learning (ICML), 2024.
+Lian, X., Zhang, C., Zhang, H., Hsieh, C.-J., Zhang, W., and
+Liu, J. Can decentralized algorithms outperform central-
+ized algorithms? a case study for decentralized parallel
+stochastic gradient descent. InAdvances in Neural Infor-
+mation Processing Systems, volume 30, 2017.
+Liu, T., Astorga, N., Seedat, N., and van der Schaar, M.
+Large language models to enhance bayesian optimization.
+InIn The Twelfth International Conference on Learning
+Representations, 2024.
+Lu, Y . and De Sa, C. Optimal complexity in decentralized
+training. InProceedings of the 38th International Confer-
+ence on Machine Learning, volume 139 ofProceedings
+of Machine Learning Research, pp. 7111–7123. PMLR,
+18–24 Jul 2021.
+Ma, Z., Gong, Y .-J., Guo, H., Chen, J., Ma, Y ., Cao, Z., and
+Zhang, J. Llamoco: Instruction tuning of large language
+models for optimization code generation.IEEE Transac-
+tions on Evolutionary Computation, pp. 1–1, 2026. doi:
+10.1109/TEVC.2026.3656374.
+McClellan, J. et al. Boosting sample efficiency and gen-
+eralization in multi-agent reinforcement learning with
+equivariant graph neural networks. InAdvances in Neu-
+ral Information Processing Systems, 2024.
+Metelev, D., Rogozin, A., Kovalev, D., and Gasnikov, A. Is
+consensus acceleration possible in decentralized optimiza-
+tion over slowly time-varying networks? InProceedings
+of the 40th International Conference on Machine Learn-
+ing, volume 202 ofProceedings of Machine Learning
+Research, pp. 24532–24554. PMLR, 2023.
+Mhanna, E. and Assaad, M. Single point-based distributed
+zeroth-order optimization with a non-convex stochastic
+objective function. InProceedings of the 40th Interna-
+tional Conference on Machine Learning, volume 202 of
+Proceedings of Machine Learning Research, pp. 24701–
+24719. PMLR, 23–29 Jul 2023.
+Nabli, A. and Oyallon, E. DADAO: Decoupled accelerated
+decentralized asynchronous optimization. InProceedings
+of the 40th International Conference on Machine Learn-
+ing, volume 202 ofProceedings of Machine Learning
+Research, pp. 25604–25626. PMLR, 23–29 Jul 2023.
+Nedic, A. and Ozdaglar, A. Distributed subgradient
+methods for multi-agent optimization.IEEE Transac-
+tions on Automatic Control, 54(1):48–61, 2009. doi:
+10.1109/TAC.2008.2009515.
+Nedi´c, A., Olshevsky, A., and Rabbat, M. G. Network
+topology and communication-computation tradeoffs in
+decentralized optimization.Proceedings of the IEEE, 106
+(5):953–976, 2018. doi: 10.1109/JPROC.2018.2817461.
+Olfati-Saber, R., Fax, J. A., and Murray, R. M. Consen-
+sus and cooperation in networked multi-agent systems.
+Proceedings of the IEEE, 95(1):215–233, 2007. doi:
+10.1109/JPROC.2006.887293.
+Pryzant, R., Iter, D., Li, J., Lee, Y . T., Zhu, C., and
+Zeng, M. Automatic prompt optimization with “gra-
+dient descent” and beam search. InProceedings of
+the 2023 Conference on Empirical Methods in Natu-
+ral Language Processing, pp. 7957–7968, 2023. doi:
+10.18653/v1/2023.emnlp-main.494.
+Qian, C., Xie, Z., Wang, Y ., Liu, W., Zhu, K., Xia, H., Dang,
+Y ., Du, Z., Chen, W., Yang, C., Liu, Z., and Sun, M.
+Scaling large language model-based multi-agent collab-
+oration. InThe Thirteenth International Conference on
+Learning Representations, 2025.
+Sahinoglu, E. and Shahrampour, S. An online optimization
+perspective on first-order and zero-order decentralized
+nonsmooth nonconvex stochastic optimization. InPro-
+ceedings of the 41st International Conference on Machine
+Learning, volume 235 ofProceedings of Machine Learn-
+ing Research, pp. 43043–43059. PMLR, 21–27 Jul 2024.
+Shi, W., Ling, Q., Wu, G., and Yin, W. Extra: An exact first-
+order algorithm for decentralized consensus optimization.
+SIAM Journal on Optimization, 25(2):944–966, 2015. doi:
+10.1137/14096668X.
+Wan, X., Sun, R., Nakhost, H., and Arik, S. ¨O. Teach
+better or show smarter? on instructions and exemplars in
+automatic prompt optimization. InAdvances in Neural
+Information Processing Systems (NeurIPS), 2024.
+Wu, Q., Bansal, G., Zhang, J., Wu, Y ., Li, B., Zhu, E., Jiang,
+L., Zhang, X., Zhang, S., Liu, J., Awadallah, A. H., White,
+R. W., Burger, D., and Wang, C. Autogen: Enabling next-
+gen llm applications via multi-agent conversation. In
+Conference on Language Modeling, 2024.
+12
+
+===== PAGE 13 =====
+Learning to Act and Cooperate for Distributed Black-Box Consensus Optimization
+Yang, C., Wang, X., Lu, Y ., Liu, H., Le, Q. V ., Zhou, D.,
+and Chen, X. Large language models as optimizers. In
+In The Twelfth International Conference on Learning
+Representations, 2024.
+Ye, R., Tang, S., Ge, R., Du, Y ., Yin, Z., Chen, S., and Shao,
+J. Mas-gpt: Training llms to build llm-based multi-agent
+systems, 2025.
+Yu, C., Velu, A., Vinitsky, E., Gao, J., Wang, Y ., Bayen,
+A., and Wu, Y . The surprising effectiveness of PPO in
+cooperative, multi-agent games. InAdvances in Neural
+Information Processing Systems, 2022.
+Yuan, D. and Ho, D. W. Randomized gradient-free method
+for multiagent optimization over time-varying networks.
+IEEE Transactions on Neural Networks and Learning
+Systems, 26(6):1342–1347, 2014.
+Yulu, Z., Youyuan, L., and Liang, Z. Joint optimization of
+multi-uav topology control, offloading and path planning
+in air-space edge computing network. In2024 Inter-
+national Conference on Cloud and Network Computing
+(ICCNC), pp. 63–70. IEEE, 2024.
+Zhang, K., Yang, Z., and Bas ¸ar, T. Multi-agent reinforce-
+ment learning: A selective overview of theories and
+algorithms. InHandbook of Reinforcement Learning
+and Control, volume 325 ofStudies in Systems, Deci-
+sion and Control, pp. 321–384. Springer, 2021. doi:
+10.1007/978-3-030-60990-0 12.
+Zhang, X.-R., Gong, Y .-J., Zhong, Y .-T., Huang, T., and
+Zhang, J. Large language model as meta-surrogate for
+offline data-driven many-task optimization: A proof-of-
+principle study.Information Sciences, 726:122762, Febru-
+ary 2025. ISSN 0020-0255. doi: 10.1016/j.ins.2025.
+122762.
+Zhuge, M., Wang, W., Kirsch, L., Faccio, F., Khizbullin,
+D., and Schmidhuber, J. GPTSwarm: Language agents
+as optimizable graphs. InProceedings of the 41st In-
+ternational Conference on Machine Learning, volume
+235 ofProceedings of Machine Learning Research, pp.
+62743–62767. PMLR, 21–27 Jul 2024.
+13
+
+===== PAGE 14 =====
+Learning to Act and Cooperate for Distributed Black-Box Consensus Optimization
+A. Appendix A: Stage-wise Interpretation of Phased Cognitive Guidance
+The Phased Cognitive Guidance (PCG) mechanism introduced in Sec. 4.4 induces a small number of implicit stages along
+the optimization trajectory. These stages are not enforced as rigid phases, but emerge naturally from the interaction between
+the internal and external cognitive gates. They provide an interpretable abstraction for understanding how learning emphasis
+evolves over time.
+Stage I: Trajectory Accumulation.During the initial phase, both internal and external cognitive gates remain inactive.
+Agents operate under the base optimization algorithm to explore the search space and collect foundational trajectories. This
+stage establishes the empirical basis required for subsequent trajectory-conditioned learning.
+Stage II: Learning to Act.In this stage, internal behavioral learning becomes active while external cooperation learning
+remains suppressed. Agents leverage accumulated trajectory information to refine their internal action behaviors, allowing
+more effective local search after sufficient exploration has been achieved.
+Stage III: Learning to Act and Cooperate.Both internal and external learning mechanisms are periodically activated.
+Agents simultaneously adapt their internal behaviors and re-evaluate cooperative interactions with neighbors, which enhances
+robustness and mitigates premature convergence caused by misleading local information.
+Stage IV: Consensus-Oriented Cooperation.In the final stage, internal behavioral adaptation is deactivated, while
+external cooperation learning continues. Agents prioritize stable coordination and consensus formation, avoiding late-stage
+instability that may arise from excessive internal variation.
+Overall, these stages provide an interpretable description of how PCG coordinates learning emphasis throughout the
+optimization process without imposing rigid temporal boundaries.
+B. Appendix B: Detailed Ablation Results
+Table 2.COMPARISON OF LAC-MAS WITH EXISTING ALGORITHMS
+MASOIE LAC-MAS-Act LAC-MAS-Coop LAC-MAS MASOIE LAC-MAS-Act LAC-MAS-Coop LAC-MAS
+fitness 6.81e+043.61e+04 5.75e+04 2.21e+046.03e+06 7.91e+065.06e+066.43e+06
+comm. cost 1.28e+09 1.45e+097.85e+081.37e+09 4.48e+08 7.28e+082.68e+08 3.71e+08
+improvement - 46.96% 15.56% 67.54% - -31.09% 16.20% -6.64%
+p-value
+F1
+- 1.18e-05# 2.28e-01 2.14e-13#
+F6
+- 1.96e-04# 1.00e-01 7.42e-01
+fitness 7.96e+04 8.65e+04 8.21e+047.57e+041.47e+051.20e+05 1.31e+05 1.06e+05
+comm. cost 1.12e+08 1.71e+087.27e+07 1.09e+083.63e+08 5.07e+082.13e+08 3.22e+08
+improvement - -8.67% -3.16% 4.83% - 18.22% 11.26% 28.19%
+p-value
+F2
+- 3.74e-02* 3.81e-01 1.54e-01#
+F7
+- 2.14e-02* 1.25e-01 3.10e-03#
+fitness 1.05e+041.01e+04 9.85e+03 9.99e+034.13e+072.78e+073.85e+073.03e+07
+comm. cost 2.17e+08 3.81e+081.38e+08 1.78e+081.19e+09 1.78e+096.62e+08 1.03e+09
+improvement - 3.28% 6.05% 4.75% - 32.83% 6.81% 26.74%
+p-value
+F3
+- 7.47E-01 7.47E-01 7.47E-01
+F8
+- 1.03e-10# 1.00e-01 1.22e-08#
+fitness 2.42e+012.41e+012.43e+012.36e+011.28e+05 1.29e+05 1.39e+051.26E+05
+comm. cost 1.03e+08 1.72e+086.63e+071.09e+08 1.08e+08 1.71e+086.99e+071.10e+08
+improvement - 0.08% -0.37% 2.42% - -0.85% -8.45% 1.52%
+p-value
+F4
+- 2.46e-01 2.46e-01 2.46e-01
+F9
+- 1.00E+00 2.85e-02* 2.73e-01
+fitness 2.14e+071.76e+07 2.13e+07 1.55e+078.28E+065.85e+06 6.33e+06 5.06E+06
+comm. cost 9.74e+08 1.26e+093.69e+08 7.20e+086.38e+08 2.29e+093.15e+089.10e+08
+improvement - 17.93% 0.37% 27.59% - 29.29% 23.54% 38.82%
+p-value
+F5
+- 8.03e-05# 7.42e-01 2.31e-08#
+F10
+- 1.26e-04# 4.76e-02* 7.98e-08#
+* and # indicate statistical significance based on the Friedman test with Nemenyi post-hoc test atα= 0.05andα= 0.01, respectively.
+Table 2. presents detailed ablation results of LAC-MAS and its variants across ten benchmark functions. LAC-MAS-Act
+removes external cooperation learning, while LAC-MAS-Coop removes internal action learning, allowing the individual
+contributions of learning to act and learning to cooperate to be examined.
+In the table, the communication cost (comm. cost) measures the cumulative communication overhead incurred during the
+14
+
+===== PAGE 15 =====
+Learning to Act and Cooperate for Distributed Black-Box Consensus Optimization
+100 101 102 103 104
+evaluation number
+10 15
+10 12
+10 9
+10 6
+10 3
+100
+103
+Disagreement
+F5: Disagreement vs. Evaluations
+LAC-MAS
+LAC-MAS-Act
+LAC-MAS-Coop
+MASOIE
+GFPDO
+RGF
+DAPSO
+(a) F5
+100 101 102 103 104
+evaluation number
+10 15
+10 12
+10 9
+10 6
+10 3
+100
+103
+Disagreement
+F6: Disagreement vs. Evaluations
+LAC-MAS
+LAC-MAS-Act
+LAC-MAS-Coop
+MASOIE
+GFPDO
+RGF
+DAPSO (b) F6
+100 101 102 103 104
+evaluation number
+10 15
+10 12
+10 9
+10 6
+10 3
+100
+103
+Disagreement
+F7: Disagreement vs. Evaluations
+LAC-MAS
+LAC-MAS-Act
+LAC-MAS-Coop
+MASOIE
+GFPDO
+RGF
+DAPSO
+(c) F7
+100 101 102 103 104
+evaluation number
+10 15
+10 12
+10 9
+10 6
+10 3
+100
+103
+Disagreement
+F8: Disagreement vs. Evaluations
+LAC-MAS
+LAC-MAS-Act
+LAC-MAS-Coop
+MASOIE
+GFPDO
+RGF
+DAPSO (d) F8
+100 101 102 103 104
+evaluation number
+10 15
+10 12
+10 9
+10 6
+10 3
+100
+103
+Disagreement
+F9: Disagreement vs. Evaluations
+LAC-MAS
+LAC-MAS-Act
+LAC-MAS-Coop
+MASOIE
+GFPDO
+RGF
+DAPSO
+(e) F9
+100 101 102 103 104
+evaluation number
+10 15
+10 12
+10 9
+10 6
+10 3
+100
+103
+Disagreement
+F10: Disagreement vs. Evaluations
+LAC-MAS
+LAC-MAS-Act
+LAC-MAS-Coop
+MASOIE
+GFPDO
+RGF
+DAPSO (f) F10
+Figure 4.Disagreement evolution on the remaining benchmark functions.
+15
+
+===== PAGE 16 =====
+Learning to Act and Cooperate for Distributed Black-Box Consensus Optimization
+optimization process, and red entries indicate the best performance for each metric on a given benchmark, while boldface
+values denote results that improve upon the baseline MASOIE. Lower fitness and communication cost correspond to better
+performance. Statistical significance is assessed using the Friedman test with the Nemenyi post-hoc test, where * and #
+indicate significance levels atα= 0.05andα= 0.01, respectively.
+Overall, the full LAC-MAS achieves the best or near-best performance on most benchmarks, demonstrating the comple-
+mentary effects of internal action learning and external cooperation learning. Specifically, variants equipped with internal
+action learning (Act) tend to achieve lower fitness values, indicating more effective local optimization, whereas variants
+with external cooperation learning (Coop) consistently reduce communication cost by reallocating neighbor influence more
+efficiently. Models that include only one learning component therefore exhibit partial improvements, but still underperform
+the full LAC-MAS. These results confirm that jointly learning how to act and how to cooperate is essential for achieving
+robust and communication-efficient performance in black-box consensus optimization.
+C. Appendix C: Additional Implementation Details for Learning to Act and Cooperate
+Internal behavior modes.For each agent, the LLM outputs a small set of discrete internal behavior modes, which
+correspond to qualitatively different exploration–convergence regimes. These modes remain fixed within a short interval,
+providing stable trajectory-level guidance. At runtime, the agent selects an active mode based on recent divergence statistics
+computed over a short historical window, decoupling high-level behavioral learning from iteration-level responsiveness.
+External cooperation weighting.For cooperation, each agent summarizes the recent behaviors of its neighbors using
+trajectory-based descriptors. The LLM maps these descriptors to relative importance scores, which are normalized to obtain
+adaptive consensus weights under a fixed and sparse communication topology. This design enables agents to emphasize
+informative neighbors while preserving stable information flow.
+Stability and decentralization.All LLM-assisted outputs are applied in a decentralized manner and remain fixed
+within short intervals, preventing oscillatory behavior and preserving execution stability. No agent accesses global state
+or centralized supervision at any point. These design choices ensure that LAC-MAS remains fully decentralized while
+benefiting from trajectory-driven learning.
+D. Appendix D: LLM Configuration and Prompt Templates
+This appendix provides the configuration details of the large language model (LLM) used in our experiments, together with
+representative prompt templates for learning to act and learning to cooperate. The purpose of this appendix is to clarify how
+trajectory information is encoded and queried, and to improve transparency and reproducibility of the proposed framework.
+D.1. LLM Configuration and Interaction Protocol
+All LLM-assisted components in LAC-MAS are implemented using a locally deployed large language model. Specifically,
+we adopt DeepSeek-R1:14B, deployed via the Ollama runtime, which enables fully local inference without reliance on
+external APIs or cloud services. This design supports local execution and is consistent with the decentralized implementation
+setting considered in this work.
+The LLM is queried through lightweight HTTP requests using curl. Each query is executed independently by an agent
+based solely on locally available information, including its own historical optimization trajectories and statistics exchanged
+with neighboring agents. No global objective values, future information, or centralized state are accessible to the LLM at
+any time.
+D.2. Prompt for Learning to Act (Agent-Internal Behavior)
+For agent-internal behavior learning, the LLM is prompted to infer suitable internal action modes based on recent optimization
+trajectories. The prompt summarizes the current iteration, recent fitness and disagreement values over a fixed temporal
+window, and a concise adaptation rule describing the desired behavioral tendencies.
+Tuning task: high-dimensional black-box optimization.
+Current iteration: around <iter>.
+16
+
+===== PAGE 17 =====
+Learning to Act and Cooperate for Distributed Black-Box Consensus Optimization
+Current parameters: d=<d>, c=<c>.
+Recent trajectory (past 19 iterations):
+Iteration <k>: fitness=<f_k>, disagreement=<g_k> |
+...
+Requirement:
+If fitness stagnates while disagreement is low, increase c;
+If fitness decreases slowly while disagreement is high, increase d.
+Only return the updated parameters in parentheses, separated by a comma.
+Constraints: d in [0.5, 1], c in [1, 1.8].
+Example: (0.7, 1.3)
+D.3. Prompt for Learning to Cooperate (Agent-External Coordination)
+For learning cooperative behaviors, the LLM is prompted to adapt neighbor influence weights based on aggregated historical
+statistics of neighboring agents. Each prompt encodes the number of neighbors, recent average fitness and disagreement
+values, and normalization constraints.
+Task: update the neighbor weight vector for multi-agent optimization.
+Number of neighbors: <N>.
+Weight update rules:
+1. If a neighbor has low fitness and low disagreement, increase its weight (0.3{0.5);
+2. If a neighbor has high fitness and high disagreement, decrease its weight (0.1{0.2);
+3. Fitness is prioritized; weights must sum to 1.
+Neighbor performance history (last 10 iterations):
+Neighbor ID <i>: avg fitness=<f_i>, avg disagreement=<g_i> |
+...
+Please return the updated weights in the format [w1, w2, ..., wN].
+Remark.The prompt templates above serve as structured interfaces between trajectory statistics and adaptive decision-
+making. They are intentionally lightweight and generic, and do not assume access to explicit objective models, benchmark
+identifiers, or centralized coordination signals. As such, they remain aligned with the decentralized black-box consensus
+optimization setting considered in this work.
+E. Appendix E. Additional Details for Consensus Preservation
+This appendix provides additional details for the consensus claim in Theorem 4.1. Our purpose is not to re-prove a
+full classical consensus theorem from first principles, but to verify that the closed-loop dynamics of LAC-MAS satisfy
+the admissibility conditions required by standard consensus results for connected row-stochastic switching systems with
+asymptotically vanishing perturbations.
+Agent-level consensus form.Let z(t)
+i denote the agent-level representative state used in consensus fusion at iteration t,
+and define the stacked vector
+z(t) = [z(t)
+1 , . . . , z(t)
+N ]⊤.(26)
+Then the cooperative update of LAC-MAS can be written as
+z(t+1) =A (t)z(t) +ξ (t),(27)
+where A(t) = [a(t)
+ik ] is the mixing matrix induced by the cooperation weights, and ξ(t) collects the effective perturbation
+introduced by local swarm evolution and internal adaptive execution before consensus fusion.
+17
+
+===== PAGE 18 =====
+Learning to Act and Cooperate for Distributed Black-Box Consensus Optimization
+Lemma C.1 (Admissibility of the cooperation matrix).For every iteration t, the matrix A(t) is nonnegative, graph-
+compatible, and row-stochastic, i.e.,
+a(t)
+ik ≥0,
+a(t)
+ik = 0ifk /∈ N i ∪ {i},
+X
+k∈Ni∪{i}
+a(t)
+ik = 1.
+(28)
+Justification.By construction, the LLM only assigns candidate weights over the existing neighbor set Ni ∪ {i}. The
+subsequent normalization/projection step guarantees nonnegativity and unit row sum before execution. Hence A(t) is
+row-stochastic and preserves the original communication sparsity pattern. Since the communication graph is fixed and
+connected, the induced switching family{A (t)}remains compatible with the same connected graph.
+Lemma C.2 (Bounded finite-stage internal adaptation).The internal action mechanism introduces only bounded and
+finitely refreshed modulation into the low-level swarm dynamics.
+Justification.The internal coefficients are selected from the finite set wi = (wi,1, w0, wi,2), hence they are bounded. The
+modulation vectors ∆(t)
+i,p are also bounded by assumption. Therefore, the internal velocity update remains a bounded
+modulation of the underlying swarm dynamics. Moreover, under PCG, internal-guidance refresh occurs only at the finitely
+many scheduled times in Tint, and is deactivated after the calibrated horizon T . Thus the internal adaptation does not induce
+persistent high-frequency switching.
+Lemma C.3 (Asymptotically vanishing perturbation).In the late-stage stable regime induced by PCG, the effective
+perturbation term in (27) satisfies
+∥ξ(t)∥ →0, t→ ∞.(29)
+Justification.After the final internal-guidance refresh, the agent-level execution enters a stable regime in which internal
+coefficient switching ceases. In this regime, the remaining variation entering consensus fusion is caused only by the decaying
+local swarm adjustment around the stabilized execution dynamics. Therefore, the perturbation term contributed by local
+black-box search to the agent-level consensus update vanishes asymptotically.
+Lemma C.4 (Consensus contraction under admissible switching).Consider the disagreement projector
+J=I− 1
+N 11⊤.(30)
+ApplyingJto (27) gives
+J z(t+1) =J A (t)z(t) +J ξ (t).(31)
+Because each A(t) is row-stochastic and graph-compatible on a connected graph, the consensus subspace span{1} is
+invariant, and the disagreement component is contracted under the associated switching consensus dynamics. Since
+ξ(t) →0, the disagreement term asymptotically vanishes.
+Proof of Theorem 4.1.By Lemma C.1, the cooperation matrix A(t) remains admissible for all t. By Lemma C.2, the
+internal action mechanism introduces only bounded finite-stage switching. By Lemma C.3, the perturbation term vanishes
+asymptotically in the late-stage stable regime. Therefore, the closed-loop system(27) is a connected row-stochastic switching
+consensus system with asymptotically vanishing perturbations. Standard consensus arguments for such systems imply
+∥z(t)
+i −z (t)
+j ∥ →0,∀i, j.(32)
+Since z(t)
+i is the agent-level representative state used in consensus fusion, this yields the claimed consensus result in
+Theorem 4.1. □
+18
+
+===== PAGE 19 =====
+Learning to Act and Cooperate for Distributed Black-Box Consensus Optimization
+F. Appendix F. Symbol Table
+Table 3: Main symbols used in LAC-MAS.
+Symbol Meaning
+G= (V,E)Fixed connected communication graph of the multi-agent system.
+V={1, . . . , N}Set of agents (nodes) in the distributed system.
+Ni Neighbor set of agentiin the communication graph.
+NNumber of agents.
+DDimension of the decision space.
+fi :R D →RLocal black-box objective function of agenti.
+f(x) =
+1
+N
+PN
+i=1 fi(x)
+Global objective defined as the average of local objectives.
+xi Agent-level decision variable of agentiin the distributed consensus formulation.
+{x(t)
+i,p}P
+p=1 Local particle population maintained by agentiat iterationt.
+x(t)
+i,p ∈R D Position of particlepin agentiat iterationt.
+v(t)
+i,p ∈R D Velocity of particlepin agentiat iterationt.
+PPopulation size of each local swarm optimizer.
+µ(t)
+i Centroid of the local particle population of agentiat iterationt.
+D(t)
+i Particle divergence of agenti, measuring the dispersion of its local particle population.
+wi = (wi,1, w0, wi,2)Internal behavioral coefficient set for agenti.
+w(t)
+i Active internal coefficient selected according to the current divergence regime.
+d1, d2 Divergence thresholds withd 1 < d 2.
+∆(t)
+i,p Random modulation vector generated by the underlying swarm update rule.
+⊙Element-wise multiplication operator.
+H(t)
+i Local trajectory/history information maintained by agentiup to iterationt.
+s(t)
+ik Trajectory-based descriptor used by agentito evaluate neighbork.
+¯f (t)
+k Recent average objective value of neighbork.
+¯D(t)
+k Recent average particle divergence of neighbork.
+∥∆xk∥
+(t)
+Recent average magnitude of state variation of neighbork.
+a(t)
+ik Cooperation weight assigned by agentito neighbork(or itself) at iterationt.
+A(t) = [a(t)
+ik ]Time-varying row-stochastic mixing matrix induced by adaptive cooperation weights.
+gext(t)Cooperation-refresh gate.
+gint(t)Internal-action refresh gate.
+Text Set of iterations at which cooperation guidance is refreshed.
+Tint Set of iterations at which internal action guidance is refreshed.
+ρext Refresh interval ratio for cooperation-guidance updates.
+ρ1, ρ2 Two key refresh ratios for internal action guidance.
+TCharacteristic optimization horizon estimated by pre-experiment calibration in PCG.
+s(t)Implicit stage index induced by the interaction of the two cognitive gates.
+τm =⌈α mT⌉Stage transition point used in the stage-wise interpretation of PCG.
+x(t)
+i Agent-level representative state of agentiused in consensus fusion at iterationt.
+x(t) =
+[x(t)
+1 , . . . , x(t)
+N ]⊤
+Stacked vector of agent-level representative states.
+ξ(t) Effective perturbation term in the closed-loop consensus dynamics.
+pt ∈R 3 Position of thet-th target in the WSN localization task.
+Continued on next page
+19
+
+===== PAGE 20 =====
+Learning to Act and Cooperate for Distributed Black-Box Consensus Optimization
+Symbol Meaning
+yi ∈R 3 Known location of sensoriin the WSN localization task.
+Nt Number of targets in the WSN localization task.
+ϕit RSS measurement from targettto sensori.
+P0 Reference RSS value at distanced 0.
+d0 Reference distance in the path-loss model.
+np Path-loss exponent in the WSN localization model.
+¯x(k) = 1
+n
+Pn
+i=1 x(k)
+i System-level estimate averaged across all sensors at communication roundk.
+Err(k) Estimation error used in the WSN task, defined asF(¯x(k)).
+20
