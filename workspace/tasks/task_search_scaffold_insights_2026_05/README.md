@@ -1,6 +1,6 @@
 # Search Scaffold Insights from 2026-05 Papers
 
-<!-- METADATA:STATUS=InProgress,ASSIGNEE=intern_agentic_quick_paper_reading -->
+<!-- METADATA:STATUS=Completed,ASSIGNEE=intern_agentic_quick_paper_reading -->
 
 ## 背景
 
